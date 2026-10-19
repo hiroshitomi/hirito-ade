@@ -61,8 +61,10 @@ export function Modal({
   );
 }
 
-export const inputClass =
-  'w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none';
+/** Estilo de campo sin tamaño, para combinar con anchos/paddings propios sin conflictos de Tailwind. */
+export const fieldClass =
+  'rounded-md border border-zinc-700 bg-zinc-950 px-3 text-sm placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none';
+export const inputClass = `${fieldClass} w-full py-2`;
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (

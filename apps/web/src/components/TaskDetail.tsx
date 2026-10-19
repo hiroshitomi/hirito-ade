@@ -4,7 +4,7 @@ import type { AgentPresetInfo, AgentRunInfo, MergeResult, MergeStrategy, Worktre
 import { api, errorMessage } from '../api/client';
 import { AgentTerminal } from './AgentTerminal';
 import { taskTitle } from './Board';
-import { Button, ErrorText, Field, inputClass, Modal } from './ui';
+import { Button, ErrorText, Field, fieldClass, inputClass, Modal } from './ui';
 
 // diff2html (con highlight.js) es la mayor parte del bundle: solo se carga al abrir "Cambios".
 const DiffViewer = lazy(() => import('./DiffViewer').then((m) => ({ default: m.DiffViewer })));
@@ -200,7 +200,7 @@ function LaunchBar(props: {
         setPrompt('');
       }}
     >
-      <select className={`${inputClass} w-auto py-1.5`} value={preset} onChange={(e) => setPreset(e.target.value)}>
+      <select className={`${fieldClass} py-1.5`} value={preset} onChange={(e) => setPreset(e.target.value)}>
         {props.presets.map((p) => (
           <option key={p.id} value={p.id}>
             {p.label}
@@ -209,7 +209,7 @@ function LaunchBar(props: {
       </select>
       {acceptsPrompt ? (
         <input
-          className={`${inputClass} min-w-48 flex-1 py-1.5`}
+          className={`${fieldClass} min-w-48 flex-1 py-1.5`}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Instrucciones (opcional)"
