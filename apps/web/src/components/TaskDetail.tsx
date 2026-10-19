@@ -1,9 +1,9 @@
-import { ArrowLeft, GitBranch, GitMerge, Play, Square, SquareTerminal, Trash2, FileDiff } from 'lucide-react';
+import { ArrowLeft, FileDiff, GitBranch, GitMerge, Hand, Play, Square, SquareTerminal, Trash2 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { AgentPresetInfo, AgentRunInfo, MergeResult, MergeStrategy, WorktreeSummary } from '@ade/shared';
 import { api, errorMessage } from '../api/client';
 import { AgentTerminal } from './AgentTerminal';
-import { taskTitle } from './Board';
+import { taskTitle } from '../lib/agentState';
 import { Button, ErrorText, Field, fieldClass, inputClass, Modal } from './ui';
 
 // diff2html (con highlight.js) es la mayor parte del bundle: solo se carga al abrir "Cambios".
@@ -23,25 +23,15 @@ type Tab = 'terminal' | 'diff';
 
 export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, onDiscarded }: Props) {
   const [tab, setTab] = useState<Tab>('terminal');
-  const [run, setRun] = useState<AgentRunInfo | null>(null);
-  const [runsLoaded, setRunsLoaded] = useState(false);
+  // Respuesta local de lanzar/detener: se muestra al instante, antes de que el
+  // tablero se refresque con worktree.agent (que trae la actividad en vivo).
+  const [localRun, setRun] = useState<AgentRunInfo | null>(null);
   const [dialog, setDialog] = useState<'merge' | 'discard' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const run = latestRun(worktree.agent, localRun);
   const running = run?.status === 'running';
-
-  // La última ejecución del agente en este worktree (la API las devuelve en orden de creación).
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .listAgents(worktree.id)
-      .then((runs) => !cancelled && setRun(runs.at(-1) ?? null))
-      .catch((err) => !cancelled && setError(errorMessage(err)))
-      .finally(() => !cancelled && setRunsLoaded(true));
-    return () => {
-      cancelled = true;
-    };
-  }, [worktree.id]);
+  const waiting = running && run.activity === 'waiting';
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !dialog && onClose();
@@ -114,7 +104,9 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
         <TabButton active={tab === 'terminal'} onClick={() => setTab('terminal')}>
           <SquareTerminal className="size-4" />
           Terminal
-          {running ? <span className="size-1.5 animate-pulse rounded-full bg-sky-400" /> : null}
+          {running ? (
+            <span className={`size-1.5 rounded-full ${waiting ? 'bg-amber-400' : 'animate-pulse bg-sky-400'}`} />
+          ) : null}
         </TabButton>
         <TabButton active={tab === 'diff'} onClick={() => setTab('diff')}>
           <FileDiff className="size-4" />
@@ -125,7 +117,13 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
       <main className="min-h-0 flex-1">
         {/* La terminal se mantiene montada al cambiar de pestaña para no perder scroll ni stream. */}
         <div className={tab === 'terminal' ? 'flex h-full flex-col' : 'hidden'}>
-          {runsLoaded && !running ? (
+          {waiting ? (
+            <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">
+              <Hand className="size-4" />
+              El agente espera tu respuesta: escribe en la terminal.
+            </div>
+          ) : null}
+          {!running ? (
             <LaunchBar
               presets={presets}
               hasPrevious={run !== null}
@@ -140,12 +138,12 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
               }}
             />
           ) : null}
-          <div className="min-h-0 flex-1">
+          <div className={`m-2 min-h-0 flex-1 overflow-hidden rounded-md border border-transparent ${waiting ? 'attention' : ''}`}>
             {run ? (
               <AgentTerminal key={run.id} run={run} onExit={handleExit} />
-            ) : runsLoaded ? (
+            ) : (
               <p className="p-8 text-center text-sm text-zinc-500">Ningún agente lanzado todavía en este worktree.</p>
-            ) : null}
+            )}
           </div>
         </div>
         {tab === 'diff' ? (
@@ -163,6 +161,13 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
       ) : null}
     </div>
   );
+}
+
+/** La ejecución más reciente; para la misma, gana la que ya terminó (estado final). */
+function latestRun(a: AgentRunInfo | null, b: AgentRunInfo | null): AgentRunInfo | null {
+  if (!a || !b) return a ?? b;
+  if (a.id !== b.id) return a.startedAt >= b.startedAt ? a : b;
+  return b.status !== 'running' ? b : a;
 }
 
 function TabButton(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {

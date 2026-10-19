@@ -14,6 +14,7 @@ const theme = {
 interface Props {
   run: AgentRunInfo;
   onExit?: (run: AgentRunInfo) => void;
+  fontSize?: number;
 }
 
 /**
@@ -21,7 +22,7 @@ interface Props {
  * Al montarse reproduce el buffer del servidor, así que reabrir la tarea muestra
  * todo lo que el agente escribió mientras no la mirabas.
  */
-export function AgentTerminal({ run, onExit }: Props) {
+export function AgentTerminal({ run, onExit, fontSize = 13 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
@@ -31,7 +32,7 @@ export function AgentTerminal({ run, onExit }: Props) {
     const term = new Terminal({
       theme,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-      fontSize: 13,
+      fontSize,
       cursorBlink: true,
       scrollback: 10_000,
       allowProposedApi: false,

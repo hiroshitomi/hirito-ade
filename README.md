@@ -31,7 +31,8 @@ ade/
             ├── api/client.ts         # cliente REST tipado con @ade/shared
             ├── hooks/usePolling.ts
             └── components/
-                ├── Board.tsx         # Kanban: En curso / Para revisar / Sin cambios
+                ├── Board.tsx         # Kanban: Te necesita / En curso / Para revisar / Sin cambios
+                ├── TerminalGrid.tsx  # vista "Terminales": hasta 4 agentes en paralelo
                 ├── NewTaskDialog.tsx # crea worktree + lanza agente
                 ├── TaskDetail.tsx    # terminal, cambios, fusionar, descartar
                 ├── AgentTerminal.tsx # xterm.js ← SSE, teclado → POST /input
@@ -54,6 +55,7 @@ Los servicios no conocen HTTP; las rutas no conocen git.
 | POST | `/api/agents` | `{ worktreeId, preset, prompt?, cols?, rows? }` → lanza en PTY |
 | GET | `/api/agents/:id/stream` | SSE `output`/`exit`, reanudable con `Last-Event-ID` |
 | POST | `/api/agents/:id/input` · `/resize` · `/stop` | Teclado de xterm · tamaño · SIGTERM→SIGKILL |
+| GET | `/api/events` | SSE global: cambios de estado de los agentes (`working` / `waiting` / fin) |
 
 Seguridad: escucha solo en loopback, exige `Host` local y `Origin` en lista blanca
 (`ADE_ALLOWED_ORIGINS`), y solo ejecuta comandos de presets — nunca uno enviado por HTTP.
@@ -68,5 +70,14 @@ npm run typecheck
 ```
 
 `ADE_REPO` es el repositorio sobre el que trabajarán los agentes (no este proyecto).
-Las columnas del tablero se derivan del estado real: agente en ejecución → *En curso*;
-commits o cambios sin fusionar → *Para revisar*; nada → *Sin cambios*.
+Las columnas del tablero se derivan del estado real: agente esperando input → *Te necesita*;
+agente trabajando → *En curso*; commits o cambios sin fusionar → *Para revisar*; nada → *Sin cambios*.
+
+**"Te necesita"**: un agente pasa a `waiting` tras 2,5 s sin producir salida (las TUIs como
+Claude Code redibujan un spinner mientras trabajan, así que el silencio indica que esperan
+una confirmación o terminaron su turno). Se marca con borde ámbar parpadeante en el tablero
+y en la vista *Terminales*, un contador en el título de la pestaña y, si las activas, una
+notificación del navegador.
+
+Limitación conocida de node-pty: bajo carga, a veces se pierde la última salida de un proceso
+que termina justo después de escribirla. No afecta a agentes interactivos de larga duración.

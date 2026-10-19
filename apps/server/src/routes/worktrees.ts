@@ -42,13 +42,18 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
     { schema: { querystring: { type: 'object', properties: { all: { type: 'boolean' } } } } },
     async (req): Promise<WorktreeSummary[]> => {
       const list = await git.listWithStatus({ managedOnly: !req.query.all });
-      return list.map((w) => ({ ...w, agentRunning: agents.isRunningFor(w.id) }));
+      return list.map((w) => ({ ...w, agentRunning: agents.isRunningFor(w.id), agent: agents.latestFor(w.id) }));
     },
   );
 
   app.get<{ Params: { id: string } }>('/:id', { schema: { params: idParams } }, async (req): Promise<WorktreeSummary> => {
     const wt = await git.get(req.params.id);
-    return { ...wt, status: await git.getStatus(wt.id), agentRunning: agents.isRunningFor(wt.id) };
+    return {
+      ...wt,
+      status: await git.getStatus(wt.id),
+      agentRunning: agents.isRunningFor(wt.id),
+      agent: agents.latestFor(wt.id),
+    };
   });
 
   app.get<{ Params: { id: string } }>('/:id/diff', { schema: { params: idParams } }, async (req) =>

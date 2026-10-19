@@ -29,7 +29,11 @@ export interface WorktreeStatus {
 export type WorktreeWithStatus = WorktreeInfo & { status: WorktreeStatus | null };
 
 /** Respuesta de GET /api/worktrees y GET /api/worktrees/:id. */
-export type WorktreeSummary = WorktreeWithStatus & { agentRunning: boolean };
+export type WorktreeSummary = WorktreeWithStatus & {
+  agentRunning: boolean;
+  /** Última ejecución de agente en este worktree, si la hubo. */
+  agent: AgentRunInfo | null;
+};
 
 export interface CreateWorktreeInput {
   /** Nombre legible de la tarea; se usa para generar id y rama. */
@@ -111,6 +115,12 @@ export interface StartAgentInput {
 
 export type AgentRunStatus = 'running' | 'exited' | 'stopped';
 
+/**
+ * Solo con status 'running': 'working' mientras el agente produce salida,
+ * 'waiting' tras unos segundos de silencio (pide confirmación o terminó su turno).
+ */
+export type AgentActivity = 'working' | 'waiting';
+
 export interface AgentRunInfo {
   id: string;
   worktreeId: string;
@@ -119,6 +129,7 @@ export interface AgentRunInfo {
   args: string[];
   pid: number;
   status: AgentRunStatus;
+  activity: AgentActivity | null;
   exitCode: number | null;
   signal: number | null;
   startedAt: string;
@@ -132,3 +143,6 @@ export interface AgentRunInfo {
 export type AgentStreamEvent =
   | { type: 'output'; seq: number; data: string }
   | { type: 'exit'; run: AgentRunInfo };
+
+/** Eventos SSE de GET /api/events: cambios de estado de cualquier agente. */
+export type AdeEvent = { type: 'agent'; run: AgentRunInfo };

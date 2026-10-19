@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { AgentStreamEvent, StartAgentInput } from '@ade/shared';
+import { openSse } from '../lib/sse.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
 import type { GitWorktreeService } from '../services/GitWorktreeService.js';
 
@@ -112,36 +113,12 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesDeps> = async (app, { gi
       const lastEventId = Number(req.headers['last-event-id']);
       const since = Number.isInteger(lastEventId) ? lastEventId : (req.query.since ?? 0);
 
-      reply.hijack();
-      const res = reply.raw;
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
+      const sse = openSse(req, reply, heartbeatMs);
+      const unsubscribe = agents.subscribe(req.params.id, since, (e: AgentStreamEvent) => {
+        sse.send(e.type, e, e.type === 'output' ? e.seq : undefined);
+        if (e.type === 'exit') sse.close();
       });
-      res.write('retry: 2000\n\n');
-
-      const send = (e: AgentStreamEvent) => {
-        const id = e.type === 'output' ? `id: ${e.seq}\n` : '';
-        // JSON en una sola línea: la salida del PTY contiene \n y \r que romperían el framing SSE.
-        res.write(`${id}event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
-        if (e.type === 'exit') close();
-      };
-
-      const heartbeat = setInterval(() => res.write(': ping\n\n'), heartbeatMs);
-      let unsubscribe = () => {};
-      let closed = false;
-      const close = () => {
-        if (closed) return;
-        closed = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-        res.end();
-      };
-      req.raw.on('close', close);
-      unsubscribe = agents.subscribe(req.params.id, since, send);
-      if (closed) unsubscribe();
+      sse.onClose(unsubscribe);
     },
   );
 };

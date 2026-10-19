@@ -34,7 +34,8 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
 };
 
 export const config = {
-  repoPath: process.env.ADE_REPO ?? process.cwd(),
+  /** Obligatorio: el repositorio sobre el que trabajan los agentes. */
+  repoPath: process.env.ADE_REPO,
   worktreesDir: process.env.ADE_WORKTREES_DIR,
   port: Number(process.env.PORT ?? 4317),
   /** Orígenes del navegador autorizados (el dev server de Vite por defecto). */

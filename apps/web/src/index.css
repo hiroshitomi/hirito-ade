@@ -10,3 +10,27 @@
 .d2h-file-wrapper {
   margin-bottom: 1rem;
 }
+
+/* Agente esperando tu respuesta: el borde late en ámbar para captar la mirada. */
+@keyframes attention-pulse {
+  0%,
+  100% {
+    border-color: var(--color-amber-400);
+    box-shadow: 0 0 0 1px var(--color-amber-400), 0 0 18px -2px color-mix(in oklab, var(--color-amber-400) 55%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklab, var(--color-amber-400) 25%, transparent);
+    box-shadow: 0 0 0 1px transparent, 0 0 0 0 transparent;
+  }
+}
+.attention {
+  border-color: var(--color-amber-400);
+  animation: attention-pulse 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Sin animación: borde ámbar fijo y más grueso. */
+  .attention {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-amber-400);
+  }
+}

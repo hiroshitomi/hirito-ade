@@ -1,9 +1,11 @@
-import { ArrowDown, ArrowUp, Bot, CircleDot, GitBranch } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, CircleDot, GitBranch, Hand } from 'lucide-react';
 import type { WorktreeSummary } from '@ade/shared';
+import { agentState, taskTitle } from '../lib/agentState';
 
-type Column = 'running' | 'review' | 'idle';
+type Column = 'waiting' | 'running' | 'review' | 'idle';
 
 const COLUMNS: { id: Column; title: string; empty: string; accent: string }[] = [
+  { id: 'waiting', title: 'Te necesita', empty: 'Ningún agente esperando', accent: 'bg-amber-400' },
   { id: 'running', title: 'En curso', empty: 'Ningún agente trabajando', accent: 'bg-sky-400' },
   { id: 'review', title: 'Para revisar', empty: 'Nada pendiente de revisión', accent: 'bg-amber-400' },
   { id: 'idle', title: 'Sin cambios', empty: 'Sin tareas en espera', accent: 'bg-zinc-500' },
@@ -11,18 +13,16 @@ const COLUMNS: { id: Column; title: string; empty: string; accent: string }[] = 
 
 /** La columna se deriva del estado real (agente + git): no hay estado que sincronizar. */
 export function columnOf(wt: WorktreeSummary): Column {
-  if (wt.agentRunning) return 'running';
+  const state = agentState(wt);
+  if (state === 'waiting') return 'waiting';
+  if (state === 'working') return 'running';
   if (wt.status && (wt.status.dirty || wt.status.ahead > 0)) return 'review';
   return 'idle';
 }
 
-export function taskTitle(wt: WorktreeSummary): string {
-  return wt.title ?? wt.id.replace(/-[0-9a-f]{6}$/, '').replace(/-/g, ' ');
-}
-
 export function Board({ worktrees, onOpen }: { worktrees: WorktreeSummary[]; onOpen: (id: string) => void }) {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {COLUMNS.map((col) => {
         const items = worktrees.filter((w) => columnOf(w) === col.id);
         return (
@@ -47,19 +47,28 @@ export function Board({ worktrees, onOpen }: { worktrees: WorktreeSummary[]; onO
 
 function TaskCard({ wt, onOpen }: { wt: WorktreeSummary; onOpen: () => void }) {
   const s = wt.status;
+  const state = agentState(wt);
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-left transition-colors hover:border-zinc-600"
+      className={`group rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-left transition-colors hover:border-zinc-600 ${
+        state === 'waiting' ? 'attention' : ''
+      }`}
     >
       <div className="flex items-start gap-2">
         <span className="line-clamp-2 flex-1 text-sm font-medium text-zinc-100 first-letter:uppercase">
           {taskTitle(wt)}
         </span>
-        {wt.agentRunning ? (
-          <span className="flex items-center gap-1 text-xs text-sky-400" title="Agente en ejecución">
+        {state === 'working' ? (
+          <span className="flex items-center gap-1 text-xs text-sky-400" title="Agente trabajando">
             <Bot className="size-3.5 animate-pulse" />
+          </span>
+        ) : null}
+        {state === 'waiting' ? (
+          <span className="flex items-center gap-1 text-xs font-medium text-amber-300" title="El agente espera tu respuesta">
+            <Hand className="size-3.5" />
+            Te espera
           </span>
         ) : null}
       </div>

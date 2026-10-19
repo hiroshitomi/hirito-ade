@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import * as pty from 'node-pty';
-import type { AgentPresetInfo, AgentRunInfo, AgentStreamEvent } from '@ade/shared';
+import type { AgentActivity, AgentPresetInfo, AgentRunInfo, AgentStreamEvent } from '@ade/shared';
 import type { AgentPreset } from '../config.js';
 import { AdeError, InvalidInputError } from '../lib/errors.js';
 
@@ -13,6 +13,12 @@ export interface AgentProcessManagerOptions {
   flushIntervalMs?: number;
   /** Tiempo entre SIGTERM y SIGKILL al detener. */
   killTimeoutMs?: number;
+  /**
+   * Silencio tras el cual se considera que el agente espera input. Las TUIs como
+   * Claude Code redibujan un spinner sin parar mientras trabajan, así que un PTY
+   * callado casi siempre significa "esperando tu respuesta".
+   */
+  idleMs?: number;
 }
 
 export interface StartAgentOptions {
@@ -50,7 +56,7 @@ interface Chunk {
   data: string;
 }
 
-class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
+class AgentRun extends EventEmitter<{ event: [AgentStreamEvent]; change: [AgentRunInfo] }> {
   info: AgentRunInfo;
   private chunks: Chunk[] = [];
   private bufferedBytes = 0;
@@ -59,13 +65,16 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
   private flushTimer: NodeJS.Timeout | null = null;
   private killTimer: NodeJS.Timeout | null = null;
   private stopRequested = false;
+  private lastOutputAt = Date.now();
+  private readonly idleCheck: NodeJS.Timeout;
   readonly exited: Promise<void>;
 
   constructor(
-    info: Omit<AgentRunInfo, 'pid' | 'status' | 'exitCode' | 'signal' | 'startedAt' | 'endedAt'>,
+    info: Pick<AgentRunInfo, 'id' | 'worktreeId' | 'preset' | 'command' | 'args'>,
     readonly proc: pty.IPty,
     private readonly maxBufferBytes: number,
     private readonly flushIntervalMs: number,
+    idleMs: number,
   ) {
     super();
     // Un SSE por cliente: evita el warning de "possible memory leak" con muchos espectadores.
@@ -76,9 +85,17 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
       status: 'running',
       exitCode: null,
       signal: null,
+      activity: 'working',
       startedAt: new Date().toISOString(),
       endedAt: null,
     };
+
+    // Un único intervalo por agente: más barato que reprogramar un timer en cada chunk.
+    this.idleCheck = setInterval(() => {
+      if (this.info.activity === 'working' && Date.now() - this.lastOutputAt >= idleMs) {
+        this.setActivity('waiting');
+      }
+    }, Math.max(50, Math.min(500, idleMs / 4)));
 
     let finalize: (() => void) | null = null;
     proc.onData((data) => {
@@ -89,8 +106,10 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
 
     this.exited = new Promise((resolve) => {
       proc.onExit(({ exitCode, signal }) => {
-        // node-pty puede emitir onExit antes que los últimos onData. Esperamos a que
-        // el PTY lleve EXIT_DRAIN_MS sin datos para no perder el final de la salida.
+        // Margen por si llega algún onData tras onExit (node-pty ya espera al cierre
+        // del socket en Unix; esto cubre otras plataformas). Limitación conocida de
+        // node-pty/kernel: bajo carga, a veces se pierde la última salida de un proceso
+        // que termina justo después de escribirla; no es recuperable desde aquí.
         let drainTimer: NodeJS.Timeout | undefined;
         finalize = () => {
           clearTimeout(drainTimer);
@@ -104,15 +123,24 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
   private finish(exitCode: number, signal: number | undefined, resolve: () => void): void {
     this.flush();
     if (this.killTimer) clearTimeout(this.killTimer);
+    clearInterval(this.idleCheck);
     this.info = {
       ...this.info,
+      activity: null,
       status: this.stopRequested ? 'stopped' : 'exited',
       exitCode,
       signal: signal ?? null,
       endedAt: new Date().toISOString(),
     };
     this.emit('event', { type: 'exit', run: this.info });
+    this.emit('change', this.info);
     resolve();
+  }
+
+  private setActivity(activity: AgentActivity): void {
+    if (this.info.activity === activity) return;
+    this.info = { ...this.info, activity };
+    this.emit('change', this.info);
   }
 
   get running(): boolean {
@@ -140,6 +168,8 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
 
     const chunk = { seq: ++this.seq, data: this.pending };
     this.pending = '';
+    this.lastOutputAt = Date.now();
+    if (this.info.activity === 'waiting') this.setActivity('working');
     this.chunks.push(chunk);
     this.bufferedBytes += chunk.data.length;
     // Ring buffer: descartamos lo más antiguo, conservando siempre el último chunk.
@@ -161,12 +191,21 @@ export class AgentProcessManager {
   private readonly maxBufferBytes: number;
   private readonly flushIntervalMs: number;
   private readonly killTimeoutMs: number;
+  private readonly idleMs: number;
+  /** Cambios de estado de cualquier agente (arranque, working/waiting, fin) para GET /api/events. */
+  private readonly changes = new EventEmitter<{ change: [AgentRunInfo] }>().setMaxListeners(0);
 
   constructor(opts: AgentProcessManagerOptions) {
     this.presets = opts.presets;
     this.maxBufferBytes = opts.maxBufferBytes ?? 2 * 1024 * 1024;
     this.flushIntervalMs = opts.flushIntervalMs ?? 16;
     this.killTimeoutMs = opts.killTimeoutMs ?? 5000;
+    this.idleMs = opts.idleMs ?? 2500;
+  }
+
+  onChange(listener: (run: AgentRunInfo) => void): () => void {
+    this.changes.on('change', listener);
+    return () => this.changes.off('change', listener);
   }
 
   listPresets(): AgentPresetInfo[] {
@@ -206,8 +245,11 @@ export class AgentProcessManager {
       proc,
       this.maxBufferBytes,
       this.flushIntervalMs,
+      this.idleMs,
     );
     this.runs.set(id, run);
+    run.on('change', (info) => this.changes.emit('change', info));
+    this.changes.emit('change', run.info);
     return run.info;
   }
 
@@ -219,6 +261,12 @@ export class AgentProcessManager {
 
   get(id: string): AgentRunInfo {
     return this.require(id).info;
+  }
+
+  /** Última ejecución (activa o no) de un worktree. */
+  latestFor(worktreeId: string): AgentRunInfo | null {
+    const runs = this.list({ worktreeId });
+    return runs.at(-1) ?? null;
   }
 
   /** Envía input (teclas desde xterm.js) al stdin del agente. */

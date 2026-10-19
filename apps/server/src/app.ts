@@ -1,6 +1,7 @@
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import { AdeError } from './lib/errors.js';
 import { agentRoutes } from './routes/agents.js';
+import { eventRoutes } from './routes/events.js';
 import { worktreeRoutes } from './routes/worktrees.js';
 import type { AgentProcessManager } from './services/AgentProcessManager.js';
 import type { GitWorktreeService } from './services/GitWorktreeService.js';
@@ -46,6 +47,7 @@ export function buildApp({ git, agents, allowedOrigins, logger = true }: AppDeps
   app.get('/api/health', async () => ({ ok: true, repoRoot: git.repoRoot, worktreesDir: git.worktreesDir }));
   app.register(worktreeRoutes, { prefix: '/api/worktrees', git, agents });
   app.register(agentRoutes, { prefix: '/api/agents', git, agents });
+  app.register(eventRoutes, { prefix: '/api/events', agents });
 
   return app;
 }

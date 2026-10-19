@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { execa } from 'execa';
-import type { AgentRunInfo, AgentStreamEvent, WorktreeInfo } from '@ade/shared';
+import type { AdeEvent, AgentRunInfo, AgentStreamEvent, WorktreeInfo, WorktreeSummary } from '@ade/shared';
 import { buildApp } from '../src/app.js';
 import type { AgentPreset } from '../src/config.js';
 import { AgentProcessManager } from '../src/services/AgentProcessManager.js';
@@ -21,7 +21,9 @@ const bash = (label: string, script: string): AgentPreset => ({
 });
 
 const presets: Record<string, AgentPreset> = {
-  echo: bash('echo', 'echo hola; read l; echo "got:$l"'),
+  // `sleep` final: node-pty puede perder la última salida si el proceso sale justo
+  // después de escribirla (carrera del PTY, no de ADE). Los agentes reales no terminan así.
+  echo: bash('echo', 'echo hola; read l; echo "got:$l"; sleep 0.2'),
   writer: { label: 'writer', command: 'bash', args: (p) => ['-c', `echo "${p}" > agent.txt; echo done`], acceptsPrompt: true },
   sleeper: bash('sleeper', 'sleep 30'),
   stubborn: bash('stubborn', "trap '' TERM; echo ready; while true; do sleep 0.1; done"),
@@ -43,16 +45,16 @@ async function api<T = unknown>(method: string, url: string, body?: unknown, hea
 }
 
 /** Lee el SSE hasta que `until` devuelva true o llegue `exit`. */
-async function readStream(
+async function readStream<E extends { type: string } = AgentStreamEvent>(
   url: string,
-  until: (events: AgentStreamEvent[]) => boolean = () => false,
+  until: (events: E[]) => boolean = () => false,
   headers: Record<string, string> = {},
 ) {
   const res = await fetch(`${base}${url}`, { headers });
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type')!, /text\/event-stream/);
   const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-  const events: AgentStreamEvent[] = [];
+  const events: E[] = [];
   const ids: string[] = [];
   let buf = '';
   try {
@@ -74,7 +76,8 @@ async function readStream(
   } finally {
     await reader.cancel().catch(() => {});
   }
-  return { events, ids, output: events.map((e) => (e.type === 'output' ? e.data : '')).join('') };
+  const output = events.map((e) => ('data' in e && typeof e.data === 'string' ? e.data : '')).join('');
+  return { events, ids, output };
 }
 
 async function waitFor(fn: () => Promise<boolean>, timeoutMs = 5000) {
@@ -95,7 +98,7 @@ before(async () => {
   await execa('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-qm', 'readme'], { cwd: repo });
 
   const git = await GitWorktreeService.create({ repoPath: repo, worktreesDir: path.join(tmp, 'wts') });
-  agents = new AgentProcessManager({ presets, killTimeoutMs: 300 });
+  agents = new AgentProcessManager({ presets, killTimeoutMs: 300, idleMs: 300 });
   app = buildApp({ git, agents, allowedOrigins: ['http://localhost:5173'], logger: false });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address();
@@ -131,7 +134,7 @@ describe('API', () => {
     assert.equal((await api('POST', `/api/agents/${run.id}/input`, { data: 'mundo\r' })).status, 204);
 
     const { events, output } = await streamDone;
-    assert.match(output, /got:mundo/);
+    assert.match(output, /got:mundo/, JSON.stringify(events.at(-1)));
     const exit = events.at(-1)!;
     assert.equal(exit.type, 'exit');
     assert.equal(exit.type === 'exit' && exit.run.exitCode, 0);
@@ -186,6 +189,29 @@ describe('API', () => {
     await readStream(`/api/agents/${run.id}/stream`, (evs) => evs.some((e) => e.type === 'output' && e.data.includes('ready')));
     assert.equal((await api('DELETE', `/api/worktrees/${wt.id}`)).status, 204);
     assert.equal((await api('GET', `/api/agents/${run.id}`)).status, 404);
+  });
+
+  test('detecta cuándo el agente espera input y lo publica en /api/events', async () => {
+    const wt = await createWorktree('espera');
+    const run = await startAgent(wt.id, 'echo');
+    const forRun = (evs: AdeEvent[]) => evs.filter((e) => e.run.id === run.id).map((e) => e.run);
+
+    // `echo hola; read l` se queda callado esperando: tras idleMs pasa a 'waiting'.
+    const waiting = await readStream<AdeEvent>('/api/events', (evs) =>
+      forRun(evs).some((r) => r.activity === 'waiting'),
+    );
+    assert.ok(forRun(waiting.events).length > 0);
+    const list = await api<WorktreeSummary[]>('GET', '/api/worktrees');
+    assert.equal(list.body.find((w) => w.id === wt.id)!.agent?.activity, 'waiting');
+
+    // Al responder vuelve a producir salida y termina: el último estado es exited sin actividad.
+    const done = readStream<AdeEvent>('/api/events', (evs) => forRun(evs).some((r) => r.status === 'exited'));
+    await new Promise((r) => setTimeout(r, 50));
+    await api('POST', `/api/agents/${run.id}/input`, { data: 'ok\r' });
+    const final = forRun((await done).events).at(-1)!;
+    assert.equal(final.status, 'exited');
+    assert.equal(final.activity, null);
+    await api('DELETE', `/api/worktrees/${wt.id}`);
   });
 
   test('validación y seguridad', async () => {
