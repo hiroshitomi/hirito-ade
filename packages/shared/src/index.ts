@@ -1,0 +1,119 @@
+// Contratos compartidos entre server y web. Solo tipos: se borran al compilar.
+
+export interface WorktreeInfo {
+  /** Identificador estable y URL-safe (= nombre de la carpeta del worktree). */
+  id: string;
+  path: string;
+  /** null si el worktree está en detached HEAD. */
+  branch: string | null;
+  head: string;
+  /** Rama desde la que se creó (persistida en git config como branch.<b>.adeBase). */
+  baseBranch: string | null;
+  isMain: boolean;
+  /** true si vive dentro del directorio de worktrees gestionado por ADE. */
+  managed: boolean;
+  locked: boolean;
+  prunable: boolean;
+}
+
+export interface WorktreeStatus {
+  dirty: boolean;
+  /** Commits en la rama del worktree que no están en la base. */
+  ahead: number;
+  /** Commits en la base que no están en la rama del worktree. */
+  behind: number;
+}
+
+export type WorktreeWithStatus = WorktreeInfo & { status: WorktreeStatus | null };
+
+export interface CreateWorktreeInput {
+  /** Nombre legible de la tarea; se usa para generar id y rama. */
+  name: string;
+  /** Rama/commit de partida. Por defecto la rama principal detectada. */
+  baseRef?: string;
+  /** Nombre de rama explícito. Por defecto `ade/<id>`. */
+  branch?: string;
+}
+
+export type FileChangeStatus = 'A' | 'M' | 'D' | 'T' | 'U' | 'X';
+
+export interface FileChange {
+  path: string;
+  status: FileChangeStatus;
+  /** null para ficheros binarios. */
+  additions: number | null;
+  deletions: number | null;
+}
+
+export interface WorktreeDiff {
+  baseBranch: string;
+  mergeBase: string;
+  files: FileChange[];
+  /** Unified diff (commits + cambios sin commitear + ficheros nuevos). */
+  patch: string;
+}
+
+export type MergeStrategy = 'merge' | 'squash';
+
+export interface MergeWorktreeInput {
+  /** Rama destino. Por defecto la baseBranch del worktree. */
+  targetBranch?: string;
+  strategy?: MergeStrategy;
+  message?: string;
+  /** Commitea automáticamente los cambios pendientes del agente. Default: true. */
+  commitPending?: boolean;
+  /** Elimina worktree + rama tras fusionar. Default: true. */
+  removeAfter?: boolean;
+}
+
+export interface MergeResult {
+  status: 'merged' | 'up-to-date';
+  targetBranch: string;
+  commit: string | null;
+  /** 'checkout': merge en el worktree que tiene la rama destino; 'ref': merge-tree sin tocar ningún checkout. */
+  mode: 'checkout' | 'ref' | null;
+  removed: boolean;
+}
+
+// -----------------------------------------------------------------------------
+// Agentes (Fase 2)
+// -----------------------------------------------------------------------------
+
+export interface AgentPresetInfo {
+  id: string;
+  label: string;
+  /** Si el preset acepta un prompt inicial. */
+  acceptsPrompt: boolean;
+}
+
+export interface StartAgentInput {
+  worktreeId: string;
+  preset: string;
+  prompt?: string;
+  cols?: number;
+  rows?: number;
+}
+
+export type AgentRunStatus = 'running' | 'exited' | 'stopped';
+
+export interface AgentRunInfo {
+  id: string;
+  worktreeId: string;
+  preset: string;
+  command: string;
+  args: string[];
+  pid: number;
+  status: AgentRunStatus;
+  exitCode: number | null;
+  signal: number | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+/**
+ * Eventos SSE de GET /api/agents/:id/stream. El `id:` SSE es el `seq` del chunk,
+ * así EventSource reanuda con Last-Event-ID tras una reconexión sin duplicar salida.
+ */
+export type AgentStreamEvent =
+  | { type: 'output'; seq: number; data: string }
+  | { type: 'exit'; run: AgentRunInfo };

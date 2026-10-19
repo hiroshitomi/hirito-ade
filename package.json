@@ -1,0 +1,13 @@
+{
+  "name": "ade",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:server": "npm run dev -w @ade/server",
+    "dev:web": "npm run dev -w @ade/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  },
+  "engines": { "node": ">=20" }
+}
