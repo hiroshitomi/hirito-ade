@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import * as pty from 'node-pty';
-import type { AgentActivity, AgentPresetInfo, AgentRunInfo, AgentStreamEvent } from '@ade/shared';
+import type { AgentActivity, AgentMode, AgentPresetInfo, AgentRunInfo, AgentStreamEvent } from '@ade/shared';
 import { childEnv, type AgentPreset } from '../config.js';
 import { AdeError, InvalidInputError } from '../lib/errors.js';
 
@@ -28,6 +28,7 @@ export interface StartAgentOptions {
   cwd: string;
   preset: string;
   prompt?: string;
+  mode?: AgentMode;
   cols?: number;
   rows?: number;
   env?: Record<string, string>;
@@ -72,7 +73,7 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent]; change: [AgentR
   readonly exited: Promise<void>;
 
   constructor(
-    info: Pick<AgentRunInfo, 'id' | 'worktreeId' | 'preset' | 'command' | 'args'>,
+    info: Pick<AgentRunInfo, 'id' | 'worktreeId' | 'preset' | 'mode' | 'command' | 'args'>,
     readonly proc: pty.IPty,
     private readonly maxBufferBytes: number,
     private readonly flushIntervalMs: number,
@@ -215,7 +216,7 @@ export class AgentProcessManager {
   listPresets(): AgentPresetInfo[] {
     return Object.entries(this.presets)
       .filter(([, p]) => !p.hidden)
-      .map(([id, p]) => ({ id, label: p.label, acceptsPrompt: p.acceptsPrompt }));
+      .map(([id, p]) => ({ id, label: p.label, acceptsPrompt: p.acceptsPrompt, modes: [...(p.modes ?? [])] }));
   }
 
   /** Presets que la API pública puede lanzar (excluye los internos, como el login). */
@@ -230,8 +231,14 @@ export class AgentProcessManager {
     const busy = this.runningFor(opts.worktreeId);
     if (busy) throw new AgentBusyError(opts.worktreeId, busy.info.id);
 
+    if (opts.mode && !preset.modes?.includes(opts.mode)) {
+      throw new InvalidInputError(`El agente '${opts.preset}' no admite el modo '${opts.mode}'`);
+    }
+    // Sin modo explícito, el predeterminado del preset (el primero) para que se vea en la UI.
+    const mode = opts.mode ?? preset.modes?.[0] ?? null;
+
     const id = randomUUID();
-    const args = preset.args(opts.prompt);
+    const args = preset.args(opts.prompt, mode ?? undefined);
     let proc: pty.IPty;
     try {
       proc = pty.spawn(preset.command, args, {
@@ -253,7 +260,7 @@ export class AgentProcessManager {
     }
 
     const run = new AgentRun(
-      { id, worktreeId: opts.worktreeId, preset: opts.preset, command: preset.command, args },
+      { id, worktreeId: opts.worktreeId, preset: opts.preset, mode, command: preset.command, args },
       proc,
       this.maxBufferBytes,
       this.flushIntervalMs,

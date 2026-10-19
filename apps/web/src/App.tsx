@@ -23,7 +23,8 @@ export function App() {
   const { data: worktrees, error, loading, refresh } = usePolling(api.listWorktrees, 3000);
   const { data: project, refresh: refreshProject } = usePolling(api.project, 10000);
   const [presets, setPresets] = useState<AgentPresetInfo[]>([]);
-  const [creating, setCreating] = useState(false);
+  // null = cerrado; { parent } = subtarea que parte de la rama de otra tarea.
+  const [creating, setCreating] = useState<{ parent?: { branch: string; title: string } } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [view, setView] = useState<View>(loadView);
@@ -120,7 +121,7 @@ export function App() {
                 <BellOff className="size-4" />
               </span>
             ) : null}
-            <Button variant="primary" onClick={() => setCreating(true)} disabled={!!error && !worktrees}>
+            <Button variant="primary" onClick={() => setCreating({})} disabled={!!error && !worktrees}>
               <Plus className="size-4" />
               Nueva tarea
             </Button>
@@ -150,7 +151,7 @@ export function App() {
           <TerminalGrid
             worktrees={worktrees}
             onOpen={setOpenId}
-            onNewTask={() => setCreating(true)}
+            onNewTask={() => setCreating({})}
             onChanged={refreshNow}
           />
         ) : null}
@@ -162,9 +163,10 @@ export function App() {
           presets={presets}
           claude={claude}
           onConnectClaude={() => setAccountOpen('claude')}
-          onClose={() => setCreating(false)}
+          parent={creating.parent}
+          onClose={() => setCreating(null)}
           onCreated={async (wt) => {
-            setCreating(false);
+            setCreating(null);
             await refresh();
             // En la vista de terminales el agente nuevo aparece en un panel; no hace falta abrir el detalle.
             if (view === 'board') setOpenId(wt.id);
@@ -180,6 +182,7 @@ export function App() {
           onClose={closeDetail}
           onChanged={refreshNow}
           onMerged={handleMerged}
+          onNewSubtask={() => setCreating({ parent: { branch: open.branch ?? open.id, title: taskTitle(open) } })}
           onDiscarded={() => {
             setOpenId(null);
             setToast('Tarea descartada');

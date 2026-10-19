@@ -42,6 +42,13 @@ const presets: Record<string, AgentPreset> = {
   writer: { label: 'writer', command: 'bash', args: (p) => ['-c', `echo "${p}" > agent.txt; echo done`], acceptsPrompt: true },
   sleeper: bash('sleeper', 'sleep 30'),
   stubborn: bash('stubborn', "trap '' TERM; echo ready; while true; do sleep 0.1; done"),
+  modal: {
+    label: 'modal',
+    command: 'bash',
+    args: (_p, mode) => ['-c', `echo "mode=${mode ?? 'none'}"; sleep 0.2`],
+    acceptsPrompt: false,
+    modes: ['manual', 'auto', 'plan'],
+  },
   envcheck: {
     ...bash('envcheck', 'echo "key=[$ANTHROPIC_API_KEY] home=[${HOME:+ok}]"; sleep 0.2'),
     unsetEnv: ['ANTHROPIC_API_KEY'],
@@ -461,6 +468,28 @@ describe('API', () => {
     const status = await missing.status();
     assert.equal(status.installed, false);
     assert.equal(status.loggedIn, false);
+  });
+
+  test('modos de permisos: se pasan al agente y se validan', async () => {
+    const presetsList = (await api<AgentPresetInfo[]>('GET', '/api/agents/presets')).body;
+    assert.deepEqual(presetsList.find((p) => p.id === 'modal')?.modes, ['manual', 'auto', 'plan']);
+    assert.deepEqual(presetsList.find((p) => p.id === 'echo')?.modes, []);
+
+    const wt = await createWorktree('con modo');
+    const run = (await api<AgentRunInfo>('POST', '/api/agents', { worktreeId: wt.id, preset: 'modal', mode: 'plan' })).body;
+    assert.equal(run.mode, 'plan');
+    await waitFor(async () => agents.get(run.id).status === 'exited');
+    assert.match((await readStream(`/api/agents/${run.id}/stream`)).output, /mode=plan/);
+
+    // Sin modo: el predeterminado del preset (el primero), visible en la UI.
+    const def = (await api<AgentRunInfo>('POST', '/api/agents', { worktreeId: wt.id, preset: 'modal' })).body;
+    assert.equal(def.mode, 'manual');
+    await waitFor(async () => agents.get(def.id).status === 'exited');
+
+    // Un agente sin modos rechaza el parámetro; un modo inventado no pasa el esquema.
+    assert.equal((await api('POST', '/api/agents', { worktreeId: wt.id, preset: 'sleeper', mode: 'auto' })).status, 400);
+    assert.equal((await api('POST', '/api/agents', { worktreeId: wt.id, preset: 'modal', mode: 'yolo' })).status, 400);
+    await api('DELETE', `/api/worktrees/${wt.id}`);
   });
 
   test('validación y seguridad', async () => {

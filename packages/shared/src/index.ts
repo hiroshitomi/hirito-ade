@@ -24,6 +24,26 @@ export interface WorktreeStatus {
   ahead: number;
   /** Commits en la base que no están en la rama del worktree. */
   behind: number;
+  /**
+   * Trabajo del agente respecto al punto de partida (merge-base con la base):
+   * commits + cambios sin commitear + ficheros nuevos.
+   */
+  changes: ChangeStats;
+}
+
+export interface ChangeStats {
+  files: number;
+  additions: number;
+  deletions: number;
+  /** Rutas tocadas (máx. 500), para detectar solapes entre tareas. */
+  paths: string[];
+}
+
+/** Otra tarea activa que está tocando los mismos ficheros: riesgo de conflicto al fusionar. */
+export interface WorktreeOverlap {
+  worktreeId: string;
+  title: string | null;
+  files: string[];
 }
 
 export type WorktreeWithStatus = WorktreeInfo & { status: WorktreeStatus | null };
@@ -33,6 +53,8 @@ export type WorktreeSummary = WorktreeWithStatus & {
   agentRunning: boolean;
   /** Última ejecución de agente en este worktree, si la hubo. */
   agent: AgentRunInfo | null;
+  /** Tareas que tocan alguno de los mismos ficheros. */
+  overlaps: WorktreeOverlap[];
 };
 
 export interface CreateWorktreeInput {
@@ -103,12 +125,23 @@ export interface AgentPresetInfo {
   label: string;
   /** Si el preset acepta un prompt inicial. */
   acceptsPrompt: boolean;
+  /** Modos de permisos que admite (vacío si el agente no los soporta). */
+  modes: AgentMode[];
 }
+
+/**
+ * Cómo pide permisos el agente (Claude Code `--permission-mode`):
+ * - manual: pregunta antes de cada edición o comando.
+ * - auto: decide solo lo seguro y pregunta lo arriesgado (clasificador de Claude Code).
+ * - plan: solo investiga y propone un plan; no toca ficheros hasta que lo apruebes.
+ */
+export type AgentMode = 'manual' | 'auto' | 'plan';
 
 export interface StartAgentInput {
   worktreeId: string;
   preset: string;
   prompt?: string;
+  mode?: AgentMode;
   cols?: number;
   rows?: number;
 }
@@ -125,6 +158,8 @@ export interface AgentRunInfo {
   id: string;
   worktreeId: string;
   preset: string;
+  /** Modo con el que arrancó (el agente puede cambiarlo después, p.ej. Shift+Tab en Claude Code). */
+  mode: AgentMode | null;
   command: string;
   args: string[];
   pid: number;

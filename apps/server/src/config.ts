@@ -1,13 +1,16 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AgentMode } from '@ade/shared';
 
 export interface AgentPreset {
   label: string;
   command: string;
-  /** Construye los argumentos a partir del prompt opcional. */
-  args: (prompt: string | undefined) => string[];
+  /** Construye los argumentos a partir del prompt y el modo de permisos opcionales. */
+  args: (prompt: string | undefined, mode?: AgentMode) => string[];
   acceptsPrompt: boolean;
+  /** Modos de permisos que admite; el primero es el predeterminado. */
+  modes?: readonly AgentMode[];
   /** Variables de entorno que se eliminan antes de lanzar el proceso. */
   unsetEnv?: readonly string[];
   /** Uso interno (p.ej. el login de Claude): no se lista ni se puede lanzar por POST /api/agents. */
@@ -49,8 +52,14 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
   claude: {
     label: 'Claude Code',
     command: 'claude',
-    args: (prompt) => ['--settings', ADE_CLAUDE_SETTINGS, ...(prompt ? [prompt] : [])],
+    args: (prompt, mode) => [
+      '--settings',
+      ADE_CLAUDE_SETTINGS,
+      ...(mode ? ['--permission-mode', mode] : []),
+      ...(prompt ? [prompt] : []),
+    ],
     acceptsPrompt: true,
+    modes: ['manual', 'auto', 'plan'],
     unsetEnv: CLAUDE_API_ENV_VARS,
   },
   codex: {

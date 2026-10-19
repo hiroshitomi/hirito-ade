@@ -1,6 +1,8 @@
-import { ArrowDown, ArrowUp, Bot, CircleDot, GitBranch, Hand } from 'lucide-react';
+import { Bot, GitBranch, Hand } from 'lucide-react';
 import type { WorktreeSummary } from '@ade/shared';
 import { agentState, taskTitle } from '../lib/agentState';
+import { ModeBadge } from './AgentMode';
+import { CodeState } from './CodeState';
 
 type Column = 'waiting' | 'running' | 'review' | 'idle';
 
@@ -46,7 +48,6 @@ export function Board({ worktrees, onOpen }: { worktrees: WorktreeSummary[]; onO
 }
 
 function TaskCard({ wt, onOpen }: { wt: WorktreeSummary; onOpen: () => void }) {
-  const s = wt.status;
   const state = agentState(wt);
   return (
     <button
@@ -76,27 +77,11 @@ function TaskCard({ wt, onOpen }: { wt: WorktreeSummary; onOpen: () => void }) {
         <GitBranch className="size-3.5 shrink-0" />
         <span className="truncate">{wt.branch ?? 'detached'}</span>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-        {wt.baseBranch ? <Chip>← {wt.baseBranch}</Chip> : null}
-        {s && s.ahead > 0 ? (
-          <Chip title="Commits por delante de la base">
-            <ArrowUp className="size-3" />
-            {s.ahead}
-          </Chip>
-        ) : null}
-        {s && s.behind > 0 ? (
-          <Chip title="Commits por detrás de la base" className="text-amber-400">
-            <ArrowDown className="size-3" />
-            {s.behind}
-          </Chip>
-        ) : null}
-        {s?.dirty ? (
-          <Chip title="Cambios sin commitear" className="text-amber-300">
-            <CircleDot className="size-3" />
-            sin commitear
-          </Chip>
-        ) : null}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+        {wt.baseBranch ? <Chip title="Rama de la que parte y en la que se fusionará">← {wt.baseBranch}</Chip> : null}
+        {wt.agent ? <ModeBadge mode={wt.agent.mode} /> : null}
       </div>
+      <CodeState wt={wt} className="mt-2" />
     </button>
   );
 }

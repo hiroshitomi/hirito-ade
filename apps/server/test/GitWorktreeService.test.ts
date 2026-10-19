@@ -7,7 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import { execa } from 'execa';
 import { DirtyWorktreeError, InvalidInputError, MergeConflictError } from '../src/lib/errors.js';
 import { parseTextStatus } from '../src/services/GitHubAuthService.js';
-import { GitWorktreeService, parseGitHubRemote, redactUrl, slugify } from '../src/services/GitWorktreeService.js';
+import { GitWorktreeService, computeOverlaps, parseGitHubRemote, redactUrl, slugify } from '../src/services/GitWorktreeService.js';
 
 // Aislar de la config git del usuario: así también se prueba la identidad de fallback.
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
@@ -69,7 +69,12 @@ describe('GitWorktreeService', () => {
 
     const all = await svc.listWithStatus();
     assert.ok(all[0]!.isMain);
-    assert.deepEqual(all.find((w) => w.id === wt.id)!.status, { dirty: false, ahead: 0, behind: 0 });
+    assert.deepEqual(all.find((w) => w.id === wt.id)!.status, {
+      dirty: false,
+      ahead: 0,
+      behind: 0,
+      changes: { files: 0, additions: 0, deletions: 0, paths: [] },
+    });
     await svc.remove(wt.id, { deleteBranch: true });
   });
 
@@ -90,7 +95,10 @@ describe('GitWorktreeService', () => {
 
     // El índice real del worktree no se ha tocado: untracked.txt sigue sin trackear.
     assert.match(await git(wt.path, 'status', '--porcelain'), /\?\? untracked\.txt/);
-    assert.deepEqual(await svc.getStatus(wt.id), { dirty: true, ahead: 1, behind: 0 });
+    const st = await svc.getStatus(wt.id);
+    assert.deepEqual({ dirty: st.dirty, ahead: st.ahead, behind: st.behind }, { dirty: true, ahead: 1, behind: 0 });
+    // Mismo recuento que el diff: 3 ficheros, +1 +1 +2 líneas.
+    assert.deepEqual({ files: st.changes.files, additions: st.changes.additions }, { files: 3, additions: 4 });
     await svc.remove(wt.id, { force: true, deleteBranch: true });
   });
 
@@ -163,6 +171,53 @@ describe('GitWorktreeService', () => {
     } finally {
       await git(repo, 'switch', '-q', 'main');
     }
+  });
+
+  test('estadísticas de cambios y solapes entre tareas', async () => {
+    const a = await svc.create({ name: 'tarea a' });
+    const b = await svc.create({ name: 'tarea b' });
+    // A: un commit que modifica README, un cambio sin commitear y un fichero nuevo.
+    await writeFile(path.join(a.path, 'README.md'), 'hola\nmundo\n');
+    await git(a.path, 'commit', '-qam', 'readme');
+    await writeFile(path.join(a.path, 'shared.txt'), 'otra cosa\n');
+    await writeFile(path.join(a.path, 'nuevo.ts'), 'uno\ndos\ntres\n');
+    // B: toca README también.
+    await writeFile(path.join(b.path, 'README.md'), 'hola desde b\n');
+
+    const list = await svc.listWithStatus({ managedOnly: true });
+    const sa = list.find((w) => w.id === a.id)!.status!;
+    assert.equal(sa.changes.files, 3);
+    assert.deepEqual([...sa.changes.paths].sort(), ['README.md', 'nuevo.ts', 'shared.txt']);
+    assert.equal(sa.changes.additions, 1 + 1 + 3); // +mundo, +otra cosa, 3 líneas nuevas
+    assert.equal(sa.changes.deletions, 1); // shared.txt cambia su única línea
+
+    const overlaps = computeOverlaps(list);
+    assert.deepEqual(overlaps.get(a.id), [{ worktreeId: b.id, title: 'tarea b', files: ['README.md'] }]);
+    assert.deepEqual(overlaps.get(b.id), [{ worktreeId: a.id, title: 'tarea a', files: ['README.md'] }]);
+
+    await svc.remove(a.id, { force: true, deleteBranch: true });
+    await svc.remove(b.id, { force: true, deleteBranch: true });
+  });
+
+  test('subtarea: parte de la rama de otra tarea y se fusiona en ella', async () => {
+    const parent = await svc.create({ name: 'feature grande' });
+    await writeFile(path.join(parent.path, 'base.txt'), 'de la tarea padre\n');
+    await git(parent.path, 'add', '-A');
+    await git(parent.path, 'commit', '-qm', 'padre');
+
+    const child = await svc.create({ name: 'parte de la feature', baseRef: parent.branch! });
+    assert.equal(child.baseBranch, parent.branch);
+    assert.ok(existsSync(path.join(child.path, 'base.txt'))); // ve el trabajo del padre
+    await writeFile(path.join(child.path, 'hijo.txt'), 'de la subtarea\n');
+
+    const res = await svc.merge(child.id); // destino por defecto: la rama del padre
+    assert.equal(res.targetBranch, parent.branch);
+    assert.equal(res.mode, 'checkout'); // la rama del padre está checkouteada en su worktree
+    assert.ok(existsSync(path.join(parent.path, 'hijo.txt')));
+    assert.ok(!existsSync(path.join(repo, 'hijo.txt'))); // main intacto hasta fusionar el padre
+
+    await svc.merge(parent.id);
+    assert.ok(existsSync(path.join(repo, 'hijo.txt')));
   });
 
   test('remove rechaza worktrees sucios salvo force', async () => {

@@ -41,6 +41,7 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesDeps> = async (app, { gi
             worktreeId: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,62}$' },
             preset: { type: 'string', minLength: 1, maxLength: 64 },
             prompt: { type: 'string', maxLength: 100_000 },
+            mode: { type: 'string', enum: ['manual', 'auto', 'plan'] },
             cols: dimension,
             rows: dimension,
           },

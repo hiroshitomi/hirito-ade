@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { WorktreeSummary } from '@ade/shared';
 import { api } from '../api/client';
 import { agentState, taskTitle, type AgentState } from '../lib/agentState';
+import { ModeBadge } from './AgentMode';
 import { AgentTerminal } from './AgentTerminal';
+import { CodeState } from './CodeState';
 import { Button } from './ui';
 
 /**
@@ -163,10 +165,7 @@ function Pane(props: {
             </option>
           ))}
         </select>
-        <span className="hidden shrink-0 items-center gap-1 font-mono text-xs text-zinc-500 lg:flex">
-          <GitBranch className="size-3" />
-          {wt.branch}
-        </span>
+        <ModeBadge mode={run.mode} />
         <div className="flex shrink-0 items-center">
           {run.status === 'running' ? (
             <IconButton title="Detener agente" onClick={() => void api.stopAgent(run.id).then(props.onChanged)}>
@@ -184,6 +183,14 @@ function Pane(props: {
       <div className="min-h-0 flex-1">
         <AgentTerminal key={run.id} run={run} fontSize={12} onExit={props.onChanged} />
       </div>
+      {/* Estado del código de este worktree: cada agente trabaja en su propia rama. */}
+      <footer className="flex items-center gap-3 border-t border-zinc-800 bg-zinc-900/70 px-2 py-1">
+        <span className="flex shrink-0 items-center gap-1 font-mono text-xs text-zinc-500" title={wt.path}>
+          <GitBranch className="size-3" />
+          {wt.branch} {wt.baseBranch ? `← ${wt.baseBranch}` : ''}
+        </span>
+        <CodeState wt={wt} className="min-w-0" />
+      </footer>
     </section>
   );
 }

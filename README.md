@@ -85,6 +85,22 @@ una confirmación o terminaron su turno). Se marca con borde ámbar parpadeante 
 y en la vista *Terminales*, un contador en el título de la pestaña y, si las activas, una
 notificación del navegador.
 
+## Varios agentes en paralelo
+
+- **Una rama por agente.** Cada tarea tiene su worktree y su rama; git no permite la misma
+  rama en dos worktrees y ADE admite un solo agente activo por worktree. Dos agentes nunca
+  escriben sobre los mismos ficheros en disco.
+- **Estado del código por tarea.** Cada tarjeta, panel de terminal y detalle muestra lo que
+  cambió ese agente respecto a su punto de partida (ficheros, +/−, commits) y si su base
+  avanzó porque se fusionó otra tarea.
+- **Solapes.** Si dos tareas tocan el mismo fichero, ambas lo avisan mientras trabajan: es
+  el conflicto que aparecería al fusionar.
+- **Subtareas.** Para repartir una feature entre varios agentes, crea una subtarea desde el
+  detalle: parte de la rama de la tarea padre y, al aprobarla, se fusiona en esa rama (no
+  en `main`). Solo ve lo que la tarea padre ya tiene **commiteado**.
+- **Modo del agente** (Claude Code `--permission-mode`): *Manual* pregunta cada acción,
+  *Auto* decide lo seguro y pregunta lo arriesgado, *Plan* solo propone un plan.
+
 ## Claude con tu suscripción
 
 ADE no usa ninguna API: ejecuta el CLI oficial `claude`, que usa la sesión iniciada en la

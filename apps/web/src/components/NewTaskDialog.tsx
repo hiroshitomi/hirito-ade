@@ -1,6 +1,7 @@
 import { Plus } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import type { AgentPresetInfo, ClaudeAuthStatus, WorktreeInfo } from '@ade/shared';
+import type { AgentMode, AgentPresetInfo, ClaudeAuthStatus, WorktreeInfo } from '@ade/shared';
+import { loadPreferredMode, ModePicker } from './AgentMode';
 import { api, errorMessage } from '../api/client';
 import { Button, ErrorText, Field, inputClass, Modal } from './ui';
 
@@ -8,14 +9,17 @@ interface Props {
   presets: AgentPresetInfo[];
   claude: ClaudeAuthStatus | null;
   onConnectClaude: () => void;
+  /** Subtarea: parte de la rama de otra tarea (y se fusionará en ella). */
+  parent?: { branch: string; title: string };
   onClose: () => void;
   onCreated: (wt: WorktreeInfo) => void;
 }
 
-export function NewTaskDialog({ presets, claude, onConnectClaude, onClose, onCreated }: Props) {
+export function NewTaskDialog({ presets, claude, onConnectClaude, parent, onClose, onCreated }: Props) {
   const [name, setName] = useState('');
-  const [baseRef, setBaseRef] = useState('');
+  const [baseRef, setBaseRef] = useState(parent?.branch ?? '');
   const [preset, setPreset] = useState(presets[0]?.id ?? '');
+  const [mode, setMode] = useState<AgentMode | null>(() => loadPreferredMode(presets[0]?.modes ?? []));
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +35,12 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, onClose, onCre
       if (preset) {
         // Si el agente no arranca, el worktree ya existe: lo abrimos igualmente y se puede relanzar.
         await api
-          .startAgent({ worktreeId: wt.id, preset, prompt: selected?.acceptsPrompt ? prompt.trim() || undefined : undefined })
+          .startAgent({
+            worktreeId: wt.id,
+            preset,
+            prompt: selected?.acceptsPrompt ? prompt.trim() || undefined : undefined,
+            mode: selected?.modes.length && mode ? mode : undefined,
+          })
           .catch(() => undefined);
       }
       onCreated(wt);
@@ -42,7 +51,7 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, onClose, onCre
   }
 
   return (
-    <Modal title="Nueva tarea" onClose={onClose} size="lg">
+    <Modal title={parent ? `Nueva subtarea de «${parent.title}»` : 'Nueva tarea'} onClose={onClose} size="lg">
       <form onSubmit={submit} className="space-y-4">
         <Field label="Nombre de la tarea" hint="Se usa para la rama: ade/<nombre>-<sufijo>">
           <input
@@ -55,11 +64,25 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, onClose, onCre
             placeholder="Arreglar validación del login"
           />
         </Field>
-        <Field label="Rama base" hint="Vacío = rama principal (main/master)">
+        <Field
+          label="Rama base"
+          hint={
+            parent
+              ? 'Parte del trabajo de la tarea padre y, al aprobarla, se fusiona en su rama (no en main).'
+              : 'Vacío = rama principal (main/master)'
+          }
+        >
           <input className={inputClass} value={baseRef} onChange={(e) => setBaseRef(e.target.value)} placeholder="main" />
         </Field>
         <Field label="Agente">
-          <select className={inputClass} value={preset} onChange={(e) => setPreset(e.target.value)}>
+          <select
+            className={inputClass}
+            value={preset}
+            onChange={(e) => {
+              setPreset(e.target.value);
+              setMode(loadPreferredMode(presets.find((p) => p.id === e.target.value)?.modes ?? []));
+            }}
+          >
             {presets.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
@@ -79,6 +102,12 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, onClose, onCre
               Conectar mi suscripción
             </button>
           </p>
+        ) : null}
+        {selected?.modes.length ? (
+          <div className="space-y-1.5">
+            <span className="text-sm font-medium text-zinc-300">Modo</span>
+            <ModePicker modes={selected.modes} value={mode} onChange={setMode} />
+          </div>
         ) : null}
         {selected?.acceptsPrompt ? (
           <Field label="Instrucciones para el agente" hint="Opcional: también puedes escribirle en la terminal">

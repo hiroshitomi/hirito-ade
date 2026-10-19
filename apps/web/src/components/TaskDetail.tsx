@@ -1,8 +1,10 @@
-import { ArrowLeft, FileDiff, GitBranch, GitMerge, Hand, Play, Square, SquareTerminal, Trash2 } from 'lucide-react';
+import { ArrowLeft, FileDiff, GitBranch, GitFork, GitMerge, Hand, Play, Square, SquareTerminal, Trash2 } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import type { AgentPresetInfo, AgentRunInfo, MergeResult, MergeStrategy, WorktreeSummary } from '@ade/shared';
+import type { AgentMode, AgentPresetInfo, AgentRunInfo, MergeResult, MergeStrategy, WorktreeSummary } from '@ade/shared';
 import { api, errorMessage } from '../api/client';
+import { loadPreferredMode, ModeBadge, ModePicker } from './AgentMode';
 import { AgentTerminal } from './AgentTerminal';
+import { CodeState, OverlapWarning } from './CodeState';
 import { taskTitle } from '../lib/agentState';
 import { Button, ErrorText, Field, fieldClass, inputClass, Modal } from './ui';
 
@@ -17,11 +19,13 @@ interface Props {
   onChanged: () => void;
   onMerged: (result: MergeResult) => void;
   onDiscarded: () => void;
+  /** Crear una subtarea que parte de la rama de esta. */
+  onNewSubtask: () => void;
 }
 
 type Tab = 'terminal' | 'diff';
 
-export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, onDiscarded }: Props) {
+export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, onDiscarded, onNewSubtask }: Props) {
   const [tab, setTab] = useState<Tab>('terminal');
   // Respuesta local de lanzar/detener: se muestra al instante, antes de que el
   // tablero se refresque con worktree.agent (que trae la actividad en vivo).
@@ -66,12 +70,20 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
         </Button>
         <div className="min-w-0">
           <h1 className="truncate font-semibold first-letter:uppercase">{taskTitle(worktree)}</h1>
-          <p className="flex items-center gap-1.5 font-mono text-xs text-zinc-500">
-            <GitBranch className="size-3.5" />
-            {worktree.branch} {worktree.baseBranch ? `← ${worktree.baseBranch}` : ''}
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-zinc-500">
+            <span className="flex items-center gap-1.5">
+              <GitBranch className="size-3.5" />
+              {worktree.branch} {worktree.baseBranch ? `← ${worktree.baseBranch}` : ''}
+            </span>
+            {run ? <ModeBadge mode={run.mode} /> : null}
+            <CodeState wt={worktree} className="font-sans" />
           </p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
+          <Button variant="ghost" onClick={onNewSubtask} title="Otra tarea que parte de esta rama y se fusiona en ella">
+            <GitFork className="size-4" />
+            Subtarea
+          </Button>
           {running ? (
             <Button onClick={stop}>
               <Square className="size-4" />
@@ -97,6 +109,15 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
       {error ? (
         <div className="px-4 pt-3">
           <ErrorText>{error}</ErrorText>
+        </div>
+      ) : null}
+      {worktree.overlaps.length ? (
+        <div className="border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-sm">
+          <OverlapWarning wt={worktree} verbose />
+          <p className="mt-0.5 text-xs text-zinc-400">
+            Fusiona primero una de las dos y luego relanza o pide al otro agente que integre los cambios de{' '}
+            <code>{worktree.baseBranch}</code>, o divide el trabajo para que no toquen los mismos ficheros.
+          </p>
         </div>
       ) : null}
 
@@ -127,10 +148,10 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
             <LaunchBar
               presets={presets}
               hasPrevious={run !== null}
-              onLaunch={async (preset, prompt) => {
+              onLaunch={async (preset, prompt, mode) => {
                 setError(null);
                 try {
-                  setRun(await api.startAgent({ worktreeId: worktree.id, preset, prompt }));
+                  setRun(await api.startAgent({ worktreeId: worktree.id, preset, prompt, mode }));
                   onChanged();
                 } catch (err) {
                   setError(errorMessage(err));
@@ -187,12 +208,15 @@ function TabButton(props: { active: boolean; onClick: () => void; children: Reac
 function LaunchBar(props: {
   presets: AgentPresetInfo[];
   hasPrevious: boolean;
-  onLaunch: (preset: string, prompt?: string) => Promise<void>;
+  onLaunch: (preset: string, prompt?: string, mode?: AgentMode) => Promise<void>;
 }) {
   const [preset, setPreset] = useState(props.presets[0]?.id ?? '');
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
-  const acceptsPrompt = props.presets.find((p) => p.id === preset)?.acceptsPrompt ?? false;
+  const selected = props.presets.find((p) => p.id === preset);
+  const acceptsPrompt = selected?.acceptsPrompt ?? false;
+  const modes = selected?.modes ?? [];
+  const [mode, setMode] = useState<AgentMode | null>(() => loadPreferredMode(props.presets[0]?.modes ?? []));
 
   return (
     <form
@@ -200,18 +224,30 @@ function LaunchBar(props: {
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        await props.onLaunch(preset, acceptsPrompt ? prompt.trim() || undefined : undefined);
+        await props.onLaunch(
+          preset,
+          acceptsPrompt ? prompt.trim() || undefined : undefined,
+          modes.length && mode ? mode : undefined,
+        );
         setBusy(false);
         setPrompt('');
       }}
     >
-      <select className={`${fieldClass} py-1.5`} value={preset} onChange={(e) => setPreset(e.target.value)}>
+      <select
+        className={`${fieldClass} py-1.5`}
+        value={preset}
+        onChange={(e) => {
+          setPreset(e.target.value);
+          setMode(loadPreferredMode(props.presets.find((p) => p.id === e.target.value)?.modes ?? []));
+        }}
+      >
         {props.presets.map((p) => (
           <option key={p.id} value={p.id}>
             {p.label}
           </option>
         ))}
       </select>
+      <ModePicker modes={modes} value={mode} onChange={setMode} compact />
       {acceptsPrompt ? (
         <input
           className={`${fieldClass} min-w-48 flex-1 py-1.5`}

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { CreateWorktreeInput, MergeWorktreeRequest, WorktreeSummary } from '@ade/shared';
-import { AdeError } from '../lib/errors.js';
+import { computeOverlaps } from '../services/GitWorktreeService.js';
+import { AdeError, WorktreeNotFoundError } from '../lib/errors.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
 import type { GitWorktreeService } from '../services/GitWorktreeService.js';
 
@@ -42,17 +43,26 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
     { schema: { querystring: { type: 'object', properties: { all: { type: 'boolean' } } } } },
     async (req): Promise<WorktreeSummary[]> => {
       const list = await git.listWithStatus({ managedOnly: !req.query.all });
-      return list.map((w) => ({ ...w, agentRunning: agents.isRunningFor(w.id), agent: agents.latestFor(w.id) }));
+      const overlaps = computeOverlaps(list.filter((w) => w.managed));
+      return list.map((w) => ({
+        ...w,
+        agentRunning: agents.isRunningFor(w.id),
+        agent: agents.latestFor(w.id),
+        overlaps: overlaps.get(w.id) ?? [],
+      }));
     },
   );
 
   app.get<{ Params: { id: string } }>('/:id', { schema: { params: idParams } }, async (req): Promise<WorktreeSummary> => {
-    const wt = await git.get(req.params.id);
+    // Los solapes necesitan el estado de todas las tareas: se reutiliza el listado.
+    const list = await git.listWithStatus({ managedOnly: true });
+    const wt = list.find((w) => w.id === req.params.id);
+    if (!wt) throw new WorktreeNotFoundError(req.params.id);
     return {
       ...wt,
-      status: await git.getStatus(wt.id),
       agentRunning: agents.isRunningFor(wt.id),
       agent: agents.latestFor(wt.id),
+      overlaps: computeOverlaps(list).get(wt.id) ?? [],
     };
   });
 

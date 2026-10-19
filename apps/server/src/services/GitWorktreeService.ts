@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execa } from 'execa';
@@ -9,7 +9,9 @@ import type {
   FileChangeStatus,
   MergeResult,
   MergeWorktreeInput,
+  ChangeStats,
   ProjectInfo,
+  WorktreeOverlap,
   WorktreeDiff,
   WorktreeInfo,
   WorktreeStatus,
@@ -395,13 +397,39 @@ export class GitWorktreeService {
   private async status(wt: WorktreeInfo): Promise<WorktreeStatus> {
     const dirty = await this.isDirty(wt.path);
     if (!wt.baseBranch || !(await this.refExists(`refs/heads/${wt.baseBranch}`))) {
-      return { dirty, ahead: 0, behind: 0 };
+      return { dirty, ahead: 0, behind: 0, changes: await this.changeStats(wt.path, 'HEAD') };
     }
-    const { stdout } = await this.git(['rev-list', '--left-right', '--count', `${wt.baseBranch}...HEAD`], {
-      cwd: wt.path,
-    });
-    const [behind = 0, ahead = 0] = stdout.split(/\s+/).map(Number);
-    return { dirty, ahead, behind };
+    const [counts, mergeBase] = await Promise.all([
+      this.git(['rev-list', '--left-right', '--count', `${wt.baseBranch}...HEAD`], { cwd: wt.path }),
+      this.git(['merge-base', wt.baseBranch, 'HEAD'], { cwd: wt.path }),
+    ]);
+    const [behind = 0, ahead = 0] = counts.stdout.split(/\s+/).map(Number);
+    return { dirty, ahead, behind, changes: await this.changeStats(wt.path, mergeBase.stdout) };
+  }
+
+  /**
+   * Trabajo del agente desde `from`: `git diff <from>` compara el working tree con ese
+   * commit (incluye commits y cambios sin commitear); los ficheros nuevos sin trackear
+   * se suman aparte. Más barato que getDiff (sin índice temporal ni patch completo).
+   */
+  private async changeStats(cwd: string, from: string): Promise<ChangeStats> {
+    const [numstat, untracked] = await Promise.all([
+      this.git(['diff', '--numstat', '-z', '--no-renames', from], { cwd }),
+      this.git(['ls-files', '--others', '--exclude-standard', '-z'], { cwd }),
+    ]);
+    let additions = 0;
+    let deletions = 0;
+    const paths: string[] = [];
+    for (const entry of splitZ(numstat.stdout)) {
+      const [add = '-', del = '-', ...p] = entry.split('\t');
+      if (add !== '-') additions += Number(add);
+      if (del !== '-') deletions += Number(del);
+      paths.push(p.join('\t'));
+    }
+    const newFiles = splitZ(untracked.stdout);
+    additions += await countLines(cwd, newFiles.slice(0, 200));
+    paths.push(...newFiles);
+    return { files: paths.length, additions, deletions, paths: paths.slice(0, 500) };
   }
 
   private async isDirty(cwd: string, opts: { ignoreUntracked?: boolean } = {}): Promise<boolean> {
@@ -562,6 +590,54 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 40)
     .replace(/-+$/, '');
+}
+
+/**
+ * Para cada tarea, las otras tareas que tocan alguno de sus ficheros. Dos agentes
+ * editando el mismo fichero en ramas distintas casi seguro chocarán al fusionar:
+ * mejor saberlo mientras trabajan que en el merge.
+ */
+export function computeOverlaps(list: WorktreeWithStatus[]): Map<string, WorktreeOverlap[]> {
+  const owners = new Map<string, WorktreeWithStatus[]>();
+  for (const wt of list) {
+    for (const p of wt.status?.changes.paths ?? []) {
+      const arr = owners.get(p);
+      if (arr) arr.push(wt);
+      else owners.set(p, [wt]);
+    }
+  }
+  const result = new Map<string, WorktreeOverlap[]>();
+  for (const wt of list) {
+    const shared = new Map<string, WorktreeOverlap>();
+    for (const p of wt.status?.changes.paths ?? []) {
+      for (const other of owners.get(p) ?? []) {
+        if (other.id === wt.id) continue;
+        const entry = shared.get(other.id) ?? { worktreeId: other.id, title: other.title, files: [] };
+        entry.files.push(p);
+        shared.set(other.id, entry);
+      }
+    }
+    result.set(wt.id, [...shared.values()]);
+  }
+  return result;
+}
+
+/** Líneas de ficheros nuevos (los que pesan más de 1 MB o no se leen, no cuentan). */
+async function countLines(cwd: string, files: string[]): Promise<number> {
+  let total = 0;
+  await Promise.all(
+    files.map(async (f) => {
+      try {
+        const full = path.join(cwd, f);
+        if ((await stat(full)).size > 1024 * 1024) return;
+        const text = await readFile(full, 'utf8');
+        total += text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+      } catch {
+        // Borrado entre medias o sin permisos: se ignora.
+      }
+    }),
+  );
+  return total;
 }
 
 function splitZ(s: string): string[] {
