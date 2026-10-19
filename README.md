@@ -58,6 +58,10 @@ Los servicios no conocen HTTP; las rutas no conocen git.
 | GET | `/api/events` | SSE global: cambios de estado de los agentes (`working` / `waiting` / fin) |
 | GET | `/api/claude/status` | Sesión de Claude Code: instalada, con sesión, ¿usa la suscripción? |
 | POST | `/api/claude/login` · `/logout` | Login oficial (`claude auth login --claudeai`) en una terminal · cerrar sesión |
+| GET | `/api/usage` | Último uso conocido de la suscripción: ventana de 5 h y semanal |
+| POST | `/api/usage/report` | Lo llama la status line de los agentes (requiere `x-ade-token`) |
+| GET | `/api/github/status` · POST `/login` · `/logout` | Cuenta de GitHub vía GitHub CLI (`gh auth login --web`) |
+| GET | `/api/project` | Proyecto: rama, cambios, remoto de GitHub (sin credenciales) y ↑/↓ respecto a origin |
 
 Seguridad: escucha solo en loopback, exige `Host` local y `Origin` en lista blanca
 (`ADE_ALLOWED_ORIGINS`), y solo ejecuta comandos de presets — nunca uno enviado por HTTP.
@@ -90,6 +94,19 @@ terminal integrada y nunca ve ni guarda credenciales.
 
 Al ejecutar `claude`, ADE quita del entorno `ANTHROPIC_API_KEY` y `ANTHROPIC_AUTH_TOKEN`:
 con ellas Claude Code facturaría por API en lugar de usar la suscripción.
+
+**Uso de la suscripción.** Los agentes de Claude se lanzan con `--settings` añadiendo una
+status line de ADE (`apps/server/bin/ade-statusline.mjs`). Claude Code le pasa los límites
+del plan (`rate_limits.five_hour` y `seven_day`, solo Pro/Max) y el script los reenvía al
+servidor, que los muestra en la barra superior y los guarda en `~/.ade/usage.json`. Aparecen
+tras la primera respuesta de un agente; dentro de ADE, esta status line sustituye a la tuya.
+
+## GitHub
+
+La cuenta se conecta igual que la de Claude, con el CLI oficial (`gh auth login --web`) en una
+terminal integrada. Instala GitHub CLI desde su
+[repositorio oficial](https://github.com/cli/cli/blob/trunk/docs/install_linux.md): la versión
+de Ubuntu suele ser antigua (ADE la soporta, pero leyendo la salida en texto).
 
 Limitación conocida de node-pty: bajo carga, a veces se pierde la última salida de un proceso
 que termina justo después de escribirla. No afecta a agentes interactivos de larga duración.

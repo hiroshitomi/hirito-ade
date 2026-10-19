@@ -3,9 +3,12 @@ import type {
   AgentRunInfo,
   ApiErrorBody,
   ClaudeAuthStatus,
+  ClaudeUsage,
   CreateWorktreeInput,
+  GitHubAuthStatus,
   MergeResult,
   MergeWorktreeRequest,
+  ProjectInfo,
   StartAgentInput,
   WorktreeDiff,
   WorktreeInfo,
@@ -65,6 +68,13 @@ export const api = {
   claudeStatus: () => request<ClaudeAuthStatus>('GET', '/api/claude/status'),
   claudeLogin: () => request<AgentRunInfo>('POST', '/api/claude/login'),
   claudeLogout: () => request<ClaudeAuthStatus>('POST', '/api/claude/logout'),
+  usage: () => request<ClaudeUsage>('GET', '/api/usage'),
+
+  githubStatus: () => request<GitHubAuthStatus>('GET', '/api/github/status'),
+  githubLogin: () => request<AgentRunInfo>('POST', '/api/github/login'),
+  githubLogout: () => request<GitHubAuthStatus>('POST', '/api/github/logout'),
+
+  project: () => request<ProjectInfo>('GET', '/api/project'),
 };
 
 export function errorMessage(err: unknown): string {

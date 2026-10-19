@@ -9,6 +9,7 @@ import type {
   FileChangeStatus,
   MergeResult,
   MergeWorktreeInput,
+  ProjectInfo,
   WorktreeDiff,
   WorktreeInfo,
   WorktreeStatus,
@@ -178,6 +179,35 @@ export class GitWorktreeService {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  }
+
+  /** Resumen del repositorio para la cabecera del dashboard. Solo lectura, sin `git fetch`. */
+  async projectInfo(): Promise<ProjectInfo> {
+    const cwd = this.repoRoot;
+    const [branchRes, status, originRes, upstreamRes] = await Promise.all([
+      this.git(['symbolic-ref', '--short', '-q', 'HEAD'], { allowExitCodes: [1] }),
+      this.git(['status', '--porcelain', '-z'], { cwd }),
+      this.git(['remote', 'get-url', 'origin'], { allowExitCodes: [2] }),
+      this.git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { allowExitCodes: [128] }),
+    ]);
+
+    let upstream: ProjectInfo['upstream'] = null;
+    if (upstreamRes.exitCode === 0 && upstreamRes.stdout) {
+      const { stdout } = await this.git(['rev-list', '--left-right', '--count', '@{u}...HEAD']);
+      const [behind = 0, ahead = 0] = stdout.split(/\s+/).map(Number);
+      upstream = { name: upstreamRes.stdout, ahead, behind };
+    }
+
+    const url = originRes.exitCode === 0 ? redactUrl(originRes.stdout) : null;
+    return {
+      name: path.basename(cwd),
+      path: cwd,
+      branch: branchRes.stdout || null,
+      // Con -z, un renombrado añade una entrada extra (la ruta original) sin prefijo "XY ".
+      changes: status.stdout.split('\0').filter((l) => /^[ MADRCUT?!]{2} /.test(l)).length,
+      remote: url ? { url, github: parseGitHubRemote(url) } : null,
+      upstream,
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -508,6 +538,19 @@ export function parseFileChanges(nameStatusZ: string, numstatZ: string): FileCha
     files.push({ path: file, status, ...(stats.get(file) ?? { additions: null, deletions: null }) });
   }
   return files;
+}
+
+/** Quita usuario/token de URLs tipo https://user:token@host/…: nunca deben llegar al navegador. */
+export function redactUrl(url: string): string {
+  return url.replace(/^(https?:\/\/)[^@/]+@/i, '$1');
+}
+
+/** owner/repo de un remoto de GitHub (https, ssh o scp-like), o null si es otro host. */
+export function parseGitHubRemote(url: string): { owner: string; repo: string; url: string } | null {
+  const m = /^(?:https?:\/\/|ssh:\/\/git@|git@)github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url);
+  if (!m) return null;
+  const [, owner = '', repo = ''] = m;
+  return { owner, repo, url: `https://github.com/${owner}/${repo}` };
 }
 
 export function slugify(name: string): string {

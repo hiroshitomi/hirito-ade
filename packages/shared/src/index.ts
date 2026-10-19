@@ -145,7 +145,7 @@ export type AgentStreamEvent =
   | { type: 'exit'; run: AgentRunInfo };
 
 /** Eventos SSE de GET /api/events: cambios de estado de cualquier agente. */
-export type AdeEvent = { type: 'agent'; run: AgentRunInfo };
+export type AdeEvent = { type: 'agent'; run: AgentRunInfo } | { type: 'usage'; usage: ClaudeUsage };
 
 // -----------------------------------------------------------------------------
 // Cuenta de Claude (suscripción)
@@ -166,4 +166,50 @@ export interface ClaudeAuthStatus {
   /** Variables de API definidas en el entorno del servidor que ADE quita a los agentes. */
   ignoredEnvVars: string[];
   error: string | null;
+}
+
+// -----------------------------------------------------------------------------
+// Proyecto, GitHub y uso
+// -----------------------------------------------------------------------------
+
+export interface ProjectInfo {
+  name: string;
+  path: string;
+  /** Rama del checkout principal (null en detached HEAD). */
+  branch: string | null;
+  /** Ficheros con cambios sin commitear en el checkout principal. */
+  changes: number;
+  /** Remoto `origin`, sin credenciales embebidas en la URL. */
+  remote: { url: string; github: { owner: string; repo: string; url: string } | null } | null;
+  /** Comparación con la rama remota que sigue la actual (sin hacer fetch). */
+  upstream: { name: string; ahead: number; behind: number } | null;
+}
+
+export interface GitHubAuthStatus {
+  installed: boolean;
+  version: string | null;
+  loggedIn: boolean;
+  login: string | null;
+  host: string;
+  /** De dónde sale el token: 'keyring', 'oauth_token', 'GH_TOKEN'… */
+  tokenSource: string | null;
+  gitProtocol: string | null;
+  error: string | null;
+}
+
+export interface UsageWindow {
+  /** 0–100 */
+  usedPercentage: number;
+  /** ISO 8601 */
+  resetsAt: string;
+}
+
+/** Límites de la suscripción de Claude (Pro/Max), tal como los reporta Claude Code. */
+export interface ClaudeUsage {
+  /** Ventana móvil de 5 horas. */
+  fiveHour: UsageWindow | null;
+  /** Límite semanal. */
+  sevenDay: UsageWindow | null;
+  /** Cuándo llegó el último dato (de cualquier agente). null = nunca. */
+  updatedAt: string | null;
 }

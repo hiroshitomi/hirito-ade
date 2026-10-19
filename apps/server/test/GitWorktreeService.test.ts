@@ -6,7 +6,8 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { execa } from 'execa';
 import { DirtyWorktreeError, InvalidInputError, MergeConflictError } from '../src/lib/errors.js';
-import { GitWorktreeService, slugify } from '../src/services/GitWorktreeService.js';
+import { parseTextStatus } from '../src/services/GitHubAuthService.js';
+import { GitWorktreeService, parseGitHubRemote, redactUrl, slugify } from '../src/services/GitWorktreeService.js';
 
 // Aislar de la config git del usuario: así también se prueba la identidad de fallback.
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
@@ -35,6 +36,24 @@ after(async () => {
 });
 
 describe('GitWorktreeService', () => {
+  test('remotos de GitHub y URLs con credenciales', () => {
+    assert.deepEqual(parseGitHubRemote('git@github.com:acme/web.git'), { owner: 'acme', repo: 'web', url: 'https://github.com/acme/web' });
+    assert.deepEqual(parseGitHubRemote('https://github.com/acme/web'), { owner: 'acme', repo: 'web', url: 'https://github.com/acme/web' });
+    assert.deepEqual(parseGitHubRemote('ssh://git@github.com/acme/web.git'), { owner: 'acme', repo: 'web', url: 'https://github.com/acme/web' });
+    assert.equal(parseGitHubRemote('git@gitlab.com:acme/web.git'), null);
+    assert.equal(redactUrl('https://x-access-token:ghs_abc@github.com/acme/web.git'), 'https://github.com/acme/web.git');
+    assert.equal(redactUrl('git@github.com:acme/web.git'), 'git@github.com:acme/web.git');
+  });
+
+  test('gh auth status en texto (versiones sin --json)', () => {
+    assert.deepEqual(parseTextStatus('github.com\n  ✓ Logged in to github.com account hiroshitomi (keyring)\n'), [
+      { state: 'success', active: true, login: 'hiroshitomi', tokenSource: 'keyring' },
+    ]);
+    assert.equal(parseTextStatus('✓ Logged in to github.com as octo (/home/u/.config/gh/hosts.yml)')[0]?.login, 'octo');
+    assert.equal(parseTextStatus('You are not logged into any GitHub hosts.').length, 0);
+    assert.equal(parseTextStatus('X Failed to log in to github.com account octo (keyring)')[0]?.state, 'error');
+  });
+
   test('slugify normaliza acentos y símbolos', () => {
     assert.equal(slugify('  Arreglar Login: ¡Ñandú! '), 'arreglar-login-nandu');
   });

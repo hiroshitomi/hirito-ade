@@ -77,7 +77,7 @@ export function TerminalGrid({ worktrees, onOpen, onNewTask, onChanged }: Props)
 
   if (slots.length === 0) {
     return (
-      <div className="flex h-[calc(100vh-7rem)] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-zinc-800 text-center">
+      <div className="flex h-[calc(100vh-10rem)] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-zinc-800 text-center">
         <Bot className="size-8 text-zinc-600" />
         <p className="text-sm text-zinc-400">No hay agentes en ejecución.</p>
         <Button variant="primary" onClick={onNewTask}>
@@ -92,7 +92,7 @@ export function TerminalGrid({ worktrees, onOpen, onNewTask, onChanged }: Props)
     slots.length === 1 ? 'grid-cols-1 grid-rows-1' : slots.length === 2 ? 'grid-cols-2 grid-rows-1' : 'grid-cols-2 grid-rows-2';
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col gap-2">
+    <div className="flex h-[calc(100vh-10rem)] flex-col gap-2">
       {hidden.length > 0 ? (
         <p className="text-xs text-zinc-500">
           {hidden.length} agente{hidden.length === 1 ? '' : 's'} más en ejecución fuera de la vista. Cámbialos desde el

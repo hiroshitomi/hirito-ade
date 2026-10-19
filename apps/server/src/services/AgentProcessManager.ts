@@ -19,6 +19,8 @@ export interface AgentProcessManagerOptions {
    * callado casi siempre significa "esperando tu respuesta".
    */
   idleMs?: number;
+  /** Variables añadidas al entorno de todos los agentes (p.ej. a dónde reportar el uso). */
+  env?: Record<string, string>;
 }
 
 export interface StartAgentOptions {
@@ -192,6 +194,7 @@ export class AgentProcessManager {
   private readonly flushIntervalMs: number;
   private readonly killTimeoutMs: number;
   private readonly idleMs: number;
+  private readonly baseEnv: Record<string, string>;
   /** Cambios de estado de cualquier agente (arranque, working/waiting, fin) para GET /api/events. */
   private readonly changes = new EventEmitter<{ change: [AgentRunInfo] }>().setMaxListeners(0);
 
@@ -201,6 +204,7 @@ export class AgentProcessManager {
     this.flushIntervalMs = opts.flushIntervalMs ?? 16;
     this.killTimeoutMs = opts.killTimeoutMs ?? 5000;
     this.idleMs = opts.idleMs ?? 2500;
+    this.baseEnv = opts.env ?? {};
   }
 
   onChange(listener: (run: AgentRunInfo) => void): () => void {
@@ -236,6 +240,7 @@ export class AgentProcessManager {
         cols: opts.cols ?? 120,
         rows: opts.rows ?? 32,
         env: childEnv(preset.unsetEnv, {
+          ...this.baseEnv,
           TERM: 'xterm-256color',
           COLORTERM: 'truecolor',
           ADE_WORKTREE_ID: opts.worktreeId,
@@ -258,6 +263,11 @@ export class AgentProcessManager {
     run.on('change', (info) => this.changes.emit('change', info));
     this.changes.emit('change', run.info);
     return run.info;
+  }
+
+  /** Como start(), pero si ya hay un proceso en marcha para ese id lo devuelve (p.ej. un login en curso). */
+  startOrReuse(opts: StartAgentOptions): AgentRunInfo {
+    return this.runningFor(opts.worktreeId)?.info ?? this.start(opts);
   }
 
   list(filter: { worktreeId?: string } = {}): AgentRunInfo[] {

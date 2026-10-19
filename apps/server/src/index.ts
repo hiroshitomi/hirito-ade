@@ -1,7 +1,10 @@
 import { buildApp } from './app.js';
 import { config, defaultAgentPresets } from './config.js';
 import { AgentProcessManager } from './services/AgentProcessManager.js';
+import { randomBytes } from 'node:crypto';
 import { ClaudeAuthService } from './services/ClaudeAuthService.js';
+import { GitHubAuthService } from './services/GitHubAuthService.js';
+import { UsageService } from './services/UsageService.js';
 import { GitWorktreeService } from './services/GitWorktreeService.js';
 
 if (!config.repoPath) {
@@ -13,11 +16,31 @@ if (!config.repoPath) {
 
 const git = await GitWorktreeService.create({ repoPath: config.repoPath, worktreesDir: config.worktreesDir });
 await git.prune();
-const agents = new AgentProcessManager({ presets: defaultAgentPresets });
 
+const usage = new UsageService(config.usageFile);
+await usage.load();
+// Nuevo en cada arranque: solo los agentes lanzados por este proceso pueden reportar uso.
+const usageReportToken = randomBytes(24).toString('hex');
+
+const agents = new AgentProcessManager({
+  presets: defaultAgentPresets,
+  env: {
+    ADE_USAGE_URL: `http://127.0.0.1:${config.port}/api/usage/report`,
+    ADE_USAGE_TOKEN: usageReportToken,
+  },
+});
 const claude = new ClaudeAuthService({ agents });
+const github = new GitHubAuthService({ agents });
 
-const app = buildApp({ git, agents, claude, allowedOrigins: config.allowedOrigins });
+const app = buildApp({
+  git,
+  agents,
+  claude,
+  github,
+  usage,
+  usageReportToken,
+  allowedOrigins: config.allowedOrigins,
+});
 
 // Al cerrar el server, no dejar agentes huérfanos.
 let shuttingDown = false;

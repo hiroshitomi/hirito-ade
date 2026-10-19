@@ -1,21 +1,19 @@
-import { Bell, BellOff, CheckCircle2, FolderGit2, Grid2x2, KanbanSquare, Plus, X } from 'lucide-react';
+import { Bell, BellOff, CheckCircle2, Grid2x2, KanbanSquare, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { AgentPresetInfo, AgentRunInfo, ClaudeAuthStatus, MergeResult } from '@ade/shared';
+import type { AgentPresetInfo, AgentRunInfo, ClaudeAuthStatus, ClaudeUsage, GitHubAuthStatus, MergeResult } from '@ade/shared';
 import { api, errorMessage } from './api/client';
 import { Board } from './components/Board';
-import { ClaudeAccountChip, ClaudeAccountDialog } from './components/ClaudeAccount';
+import { ClaudeAccountDialog } from './components/ClaudeAccount';
+import { GitHubAccountDialog } from './components/GitHubAccount';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { TaskDetail } from './components/TaskDetail';
 import { TerminalGrid } from './components/TerminalGrid';
+import { ProjectSummary, StatusStrip } from './components/TopBar';
 import { Button } from './components/ui';
 import { useAgentEvents } from './hooks/useAgentEvents';
 import { useNotifications } from './hooks/useNotifications';
 import { usePolling } from './hooks/usePolling';
-import { needsAttention, taskTitle } from './lib/agentState';
-
-interface Health {
-  repoRoot: string;
-}
+import { agentState, needsAttention, taskTitle } from './lib/agentState';
 
 type View = 'board' | 'terminals';
 const VIEW_KEY = 'ade.view';
@@ -23,23 +21,23 @@ const VIEW_KEY = 'ade.view';
 export function App() {
   // El polling cubre cambios de git (ficheros editados); los de agentes llegan al instante por /api/events.
   const { data: worktrees, error, loading, refresh } = usePolling(api.listWorktrees, 3000);
+  const { data: project, refresh: refreshProject } = usePolling(api.project, 10000);
   const [presets, setPresets] = useState<AgentPresetInfo[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [view, setView] = useState<View>(loadView);
   const [claude, setClaude] = useState<ClaudeAuthStatus | null>(null);
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [github, setGitHub] = useState<GitHubAuthStatus | null>(null);
+  const [usage, setUsage] = useState<ClaudeUsage | null>(null);
+  const [accountOpen, setAccountOpen] = useState<'claude' | 'github' | null>(null);
   const notifications = useNotifications();
 
   useEffect(() => {
     api.listPresets().then(setPresets).catch(() => undefined);
     api.claudeStatus().then(setClaude).catch(() => undefined);
-    fetch('/api/health')
-      .then((r) => r.json() as Promise<Health>)
-      .then(setHealth)
-      .catch(() => undefined);
+    api.githubStatus().then(setGitHub).catch(() => undefined);
+    api.usage().then(setUsage).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -61,19 +59,21 @@ export function App() {
   const handleWaiting = useCallback(
     (run: AgentRunInfo) => {
       const wt = worktrees?.find((w) => w.id === run.worktreeId);
-      if (!wt) return; // p.ej. la terminal del login de Claude: no es una tarea
+      if (!wt) return; // p.ej. la terminal de un login: no es una tarea
       const title = taskTitle(wt);
       notifications.notify(`ADE · ${title}`, 'El agente espera tu respuesta', run.id, () => setOpenId(run.worktreeId));
     },
     [worktrees, notifications],
   );
-  useAgentEvents(refreshNow, handleWaiting);
+  useAgentEvents({ onAnyChange: refreshNow, onWaiting: handleWaiting, onUsage: setUsage });
 
   // "(2) ADE" en la pestaña: visible aunque estés en otra ventana.
   const waitingCount = worktrees?.filter(needsAttention).length ?? 0;
+  const workingCount = worktrees?.filter((w) => agentState(w) === 'working').length ?? 0;
   useEffect(() => {
-    document.title = waitingCount ? `(${waitingCount}) ADE · te necesita` : 'ADE';
-  }, [waitingCount]);
+    const name = project?.name ? `ADE · ${project.name}` : 'ADE';
+    document.title = waitingCount ? `(${waitingCount}) ${name} · te necesita` : name;
+  }, [waitingCount, project?.name]);
 
   const closeDetail = useCallback(() => {
     setOpenId(null);
@@ -89,78 +89,79 @@ export function App() {
         : `Fusionado en ${result.targetBranch} (${result.commit?.slice(0, 7)})`,
     );
     void refresh();
+    void refreshProject(); // la rama principal avanzó
   }
 
   return (
-    <div className={`mx-auto px-4 py-4 ${view === 'terminals' ? 'max-w-none' : 'max-w-7xl py-6'}`}>
-      <header className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold tracking-tight">ADE</h1>
-          {health ? (
-            <p className="flex items-center gap-1.5 truncate font-mono text-xs text-zinc-500">
-              <FolderGit2 className="size-3.5 shrink-0" />
-              {health.repoRoot}
-            </p>
-          ) : null}
-        </div>
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-20 bg-zinc-950/95 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-800 px-4 py-2.5">
+          <span className="rounded-md bg-indigo-600 px-2 py-1 text-sm font-bold tracking-tight">ADE</span>
+          <ProjectSummary project={project} />
 
-        <div className="ml-auto flex items-center gap-2">
-          <ClaudeAccountChip status={claude} onClick={() => setAccountOpen(true)} />
-          {waitingCount > 0 ? (
-            <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-medium text-amber-300">
-              {waitingCount} te {waitingCount === 1 ? 'espera' : 'esperan'}
-            </span>
-          ) : null}
-          <div className="flex rounded-md border border-zinc-800 p-0.5" role="tablist" aria-label="Vista">
-            <ViewTab active={view === 'board'} onClick={() => setView('board')} title="Tablero">
-              <KanbanSquare className="size-4" />
-              Tablero
-            </ViewTab>
-            <ViewTab active={view === 'terminals'} onClick={() => setView('terminals')} title="Hasta 4 terminales a la vez">
-              <Grid2x2 className="size-4" />
-              Terminales
-            </ViewTab>
-          </div>
-          {notifications.permission === 'default' ? (
-            <Button variant="ghost" onClick={() => void notifications.request()} title="Avisarme cuando un agente me necesite">
-              <Bell className="size-4" />
-              Activar avisos
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex rounded-md border border-zinc-800 p-0.5" role="tablist" aria-label="Vista">
+              <ViewTab active={view === 'board'} onClick={() => setView('board')} title="Tablero">
+                <KanbanSquare className="size-4" />
+                Tablero
+              </ViewTab>
+              <ViewTab active={view === 'terminals'} onClick={() => setView('terminals')} title="Hasta 4 terminales a la vez">
+                <Grid2x2 className="size-4" />
+                Terminales
+              </ViewTab>
+            </div>
+            {notifications.permission === 'default' ? (
+              <Button variant="ghost" onClick={() => void notifications.request()} title="Avisarme cuando un agente me necesite">
+                <Bell className="size-4" />
+                Activar avisos
+              </Button>
+            ) : notifications.permission === 'denied' ? (
+              <span title="Notificaciones bloqueadas en el navegador" className="p-1.5 text-zinc-600">
+                <BellOff className="size-4" />
+              </span>
+            ) : null}
+            <Button variant="primary" onClick={() => setCreating(true)} disabled={!!error && !worktrees}>
+              <Plus className="size-4" />
+              Nueva tarea
             </Button>
-          ) : notifications.permission === 'denied' ? (
-            <span title="Notificaciones bloqueadas en el navegador" className="p-1.5 text-zinc-600">
-              <BellOff className="size-4" />
-            </span>
-          ) : null}
-          <Button variant="primary" onClick={() => setCreating(true)} disabled={!!error && !worktrees}>
-            <Plus className="size-4" />
-            Nueva tarea
-          </Button>
+          </div>
         </div>
+        <StatusStrip
+          claude={claude}
+          usage={usage}
+          github={github}
+          working={workingCount}
+          waiting={waitingCount}
+          onOpenClaude={() => setAccountOpen('claude')}
+          onOpenGitHub={() => setAccountOpen('github')}
+        />
       </header>
 
-      {error ? (
-        <p className="mb-4 rounded-md bg-rose-950/60 px-3 py-2 text-sm text-rose-300">
-          No se puede conectar con el servidor ADE: {errorMessage(error)}
-        </p>
-      ) : null}
+      <main className={`flex-1 px-4 py-4 ${view === 'terminals' ? '' : 'mx-auto w-full max-w-7xl'}`}>
+        {error ? (
+          <p className="mb-4 rounded-md bg-rose-950/60 px-3 py-2 text-sm text-rose-300">
+            No se puede conectar con el servidor ADE: {errorMessage(error)}
+          </p>
+        ) : null}
 
-      {worktrees && view === 'board' ? <Board worktrees={worktrees} onOpen={setOpenId} /> : null}
-      {/* Se desmonta con el detalle abierto: sus terminales liberan conexiones SSE (máx. 6 por host). */}
-      {worktrees && view === 'terminals' && !open ? (
-        <TerminalGrid
-          worktrees={worktrees}
-          onOpen={setOpenId}
-          onNewTask={() => setCreating(true)}
-          onChanged={refreshNow}
-        />
-      ) : null}
-      {loading && !worktrees ? <p className="text-sm text-zinc-500">Cargando…</p> : null}
+        {worktrees && view === 'board' ? <Board worktrees={worktrees} onOpen={setOpenId} /> : null}
+        {/* Se desmonta con el detalle abierto: sus terminales liberan conexiones SSE (máx. 6 por host). */}
+        {worktrees && view === 'terminals' && !open ? (
+          <TerminalGrid
+            worktrees={worktrees}
+            onOpen={setOpenId}
+            onNewTask={() => setCreating(true)}
+            onChanged={refreshNow}
+          />
+        ) : null}
+        {loading && !worktrees ? <p className="text-sm text-zinc-500">Cargando…</p> : null}
+      </main>
 
       {creating ? (
         <NewTaskDialog
           presets={presets}
           claude={claude}
-          onConnectClaude={() => setAccountOpen(true)}
+          onConnectClaude={() => setAccountOpen('claude')}
           onClose={() => setCreating(false)}
           onCreated={async (wt) => {
             setCreating(false);
@@ -187,8 +188,16 @@ export function App() {
         />
       ) : null}
 
-      {accountOpen ? (
-        <ClaudeAccountDialog status={claude} onStatus={setClaude} onClose={() => setAccountOpen(false)} />
+      {accountOpen === 'claude' ? (
+        <ClaudeAccountDialog status={claude} onStatus={setClaude} onClose={() => setAccountOpen(null)} />
+      ) : null}
+      {accountOpen === 'github' ? (
+        <GitHubAccountDialog
+          status={github}
+          project={project}
+          onStatus={setGitHub}
+          onClose={() => setAccountOpen(null)}
+        />
       ) : null}
 
       {toast ? (

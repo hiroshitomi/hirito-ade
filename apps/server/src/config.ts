@@ -1,4 +1,6 @@
 import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface AgentPreset {
   label: string;
@@ -18,6 +20,18 @@ export interface AgentPreset {
  */
 export const CLAUDE_API_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
 
+/** Script de status line que reporta a ADE el uso de la suscripción (ver bin/ade-statusline.mjs). */
+export const STATUSLINE_SCRIPT = fileURLToPath(new URL('../bin/ade-statusline.mjs', import.meta.url));
+
+/**
+ * Ajustes extra para los agentes de Claude Code: solo la status line de ADE. Se suman
+ * a tu configuración (`--settings` no la reemplaza), aunque dentro de ADE esta status
+ * line sustituye a la tuya si tienes una.
+ */
+const ADE_CLAUDE_SETTINGS = JSON.stringify({
+  statusLine: { type: 'command', command: `"${process.execPath}" "${STATUSLINE_SCRIPT}"` },
+});
+
 /** Entorno para un proceso hijo: el del servidor menos `unset`, más `extra`. */
 export function childEnv(unset: readonly string[] = [], extra: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {};
@@ -35,7 +49,7 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
   claude: {
     label: 'Claude Code',
     command: 'claude',
-    args: (prompt) => (prompt ? [prompt] : []),
+    args: (prompt) => ['--settings', ADE_CLAUDE_SETTINGS, ...(prompt ? [prompt] : [])],
     acceptsPrompt: true,
     unsetEnv: CLAUDE_API_ENV_VARS,
   },
@@ -50,6 +64,14 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
     command: process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash'),
     args: () => [],
     acceptsPrompt: false,
+  },
+  // Login de GitHub CLI por navegador (código de un solo uso). Lo lanza /api/github/login.
+  'gh-login': {
+    label: 'Iniciar sesión en GitHub',
+    command: 'gh',
+    args: () => ['auth', 'login', '--hostname', 'github.com', '--git-protocol', 'https', '--web'],
+    acceptsPrompt: false,
+    hidden: true,
   },
   // Flujo oficial de login con la suscripción (OAuth en el navegador). Lo lanza /api/claude/login.
   'claude-login': {
@@ -67,6 +89,8 @@ export const config = {
   repoPath: process.env.ADE_REPO,
   worktreesDir: process.env.ADE_WORKTREES_DIR,
   port: Number(process.env.PORT ?? 4317),
+  /** Donde se guarda el último uso conocido de la suscripción. */
+  usageFile: process.env.ADE_USAGE_FILE ?? path.join(os.homedir(), '.ade', 'usage.json'),
   /** Orígenes del navegador autorizados (el dev server de Vite por defecto). */
   allowedOrigins: (process.env.ADE_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173')
     .split(',')

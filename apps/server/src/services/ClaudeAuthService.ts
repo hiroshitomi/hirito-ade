@@ -88,9 +88,7 @@ export class ClaudeAuthService {
 
   /** Abre el login oficial en un PTY; si ya hay uno en curso, devuelve ese. */
   startLogin(): AgentRunInfo {
-    const running = this.agents.list({ worktreeId: CLAUDE_LOGIN_SESSION }).find((r) => r.status === 'running');
-    if (running) return running;
-    return this.agents.start({ worktreeId: CLAUDE_LOGIN_SESSION, cwd: os.homedir(), preset: this.loginPreset });
+    return this.agents.startOrReuse({ worktreeId: CLAUDE_LOGIN_SESSION, cwd: os.homedir(), preset: this.loginPreset });
   }
 
   async logout(): Promise<ClaudeAuthStatus> {

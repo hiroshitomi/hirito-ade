@@ -10,6 +10,9 @@ import type {
   AgentRunInfo,
   AgentStreamEvent,
   ClaudeAuthStatus,
+  ClaudeUsage,
+  GitHubAuthStatus,
+  ProjectInfo,
   WorktreeInfo,
   WorktreeSummary,
 } from '@ade/shared';
@@ -17,6 +20,9 @@ import { buildApp } from '../src/app.js';
 import type { AgentPreset } from '../src/config.js';
 import { AgentProcessManager } from '../src/services/AgentProcessManager.js';
 import { ClaudeAuthService } from '../src/services/ClaudeAuthService.js';
+import { GitHubAuthService } from '../src/services/GitHubAuthService.js';
+import { UsageService } from '../src/services/UsageService.js';
+import { defaultAgentPresets } from '../src/config.js';
 import { GitWorktreeService } from '../src/services/GitWorktreeService.js';
 
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
@@ -41,6 +47,22 @@ const presets: Record<string, AgentPreset> = {
     unsetEnv: ['ANTHROPIC_API_KEY'],
   },
 };
+
+// `gh` falso: estado por fichero, login por código de un solo uso.
+const FAKE_GH = `#!/usr/bin/env bash
+case "$1 $2" in
+  "--version "*) echo "gh version 2.89.0 (2026-03-26)" ;;
+  "auth status")
+    if [ -f "$FAKE_GH_STATE" ]; then
+      echo '{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"hiroshitomi","tokenSource":"keyring","gitProtocol":"https"}]}}'
+    else echo '{"hosts":{}}'; fi ;;
+  "auth login")
+    echo "! First copy your one-time code: ABCD-1234"
+    printf "Press Enter to open https://github.com/login/device in your browser... "; read -r
+    touch "$FAKE_GH_STATE"; echo "✓ Logged in as hiroshitomi"; sleep 0.2 ;;
+  "auth logout") [ "$5" = "--user" ] && rm -f "$FAKE_GH_STATE" ;;
+esac
+`;
 
 // `claude` falso: imita `--version`, `auth status --json` y `auth login`. Si ve
 // ANTHROPIC_API_KEY responde como Claude Code (método api_key), así el test
@@ -71,6 +93,9 @@ let app: ReturnType<typeof buildApp>;
 let agents: AgentProcessManager;
 let claude: ClaudeAuthService;
 let fakeClaude: string;
+let repoPath: string;
+let usage: UsageService;
+const USAGE_TOKEN = 'token-de-prueba';
 
 async function api<T = unknown>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}) {
   const res = await fetch(`${base}${url}`, {
@@ -129,6 +154,7 @@ async function waitFor(fn: () => Promise<boolean>, timeoutMs = 5000) {
 before(async () => {
   tmp = await mkdtemp(path.join(os.tmpdir(), 'ade-api-'));
   const repo = path.join(tmp, 'repo');
+  repoPath = repo;
   await execa('git', ['init', '-q', '-b', 'main', repo]);
   await writeFile(path.join(repo, 'README.md'), 'hola\n');
   await execa('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-qm', 'init', '--allow-empty'], { cwd: repo });
@@ -147,9 +173,30 @@ before(async () => {
     unsetEnv: ['ANTHROPIC_API_KEY'],
     hidden: true,
   };
+  const fakeGh = path.join(tmp, 'fake-gh');
+  await writeFile(fakeGh, FAKE_GH, { mode: 0o755 });
+  process.env.FAKE_GH_STATE = path.join(tmp, 'gh-logged-in');
+  presets['gh-login'] = {
+    label: 'gh',
+    command: fakeGh,
+    args: () => ['auth', 'login', '--web'],
+    acceptsPrompt: false,
+    hidden: true,
+  };
   agents = new AgentProcessManager({ presets, killTimeoutMs: 300, idleMs: 300 });
   claude = new ClaudeAuthService({ agents, command: fakeClaude });
-  app = buildApp({ git, agents, claude, allowedOrigins: ['http://localhost:5173'], logger: false });
+  const github = new GitHubAuthService({ agents, command: fakeGh });
+  usage = new UsageService(path.join(tmp, 'usage.json'));
+  app = buildApp({
+    git,
+    agents,
+    claude,
+    github,
+    usage,
+    usageReportToken: USAGE_TOKEN,
+    allowedOrigins: ['http://localhost:5173'],
+    logger: false,
+  });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address();
   base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
@@ -244,7 +291,8 @@ describe('API', () => {
   test('detecta cuándo el agente espera input y lo publica en /api/events', async () => {
     const wt = await createWorktree('espera');
     const run = await startAgent(wt.id, 'echo');
-    const forRun = (evs: AdeEvent[]) => evs.filter((e) => e.run.id === run.id).map((e) => e.run);
+    const forRun = (evs: AdeEvent[]) =>
+      evs.flatMap((e) => (e.type === 'agent' && e.run.id === run.id ? [e.run] : []));
 
     // `echo hola; read l` se queda callado esperando: tras idleMs pasa a 'waiting'.
     const waiting = await readStream<AdeEvent>('/api/events', (evs) =>
@@ -316,6 +364,96 @@ describe('API', () => {
     } finally {
       delete process.env.ANTHROPIC_API_KEY;
     }
+  });
+
+  test('información del proyecto: rama, cambios y remoto sin credenciales', async () => {
+    let info = (await api<ProjectInfo>('GET', '/api/project')).body;
+    assert.equal(info.name, 'repo');
+    assert.equal(info.branch, 'main');
+    assert.equal(info.remote, null);
+    assert.equal(info.upstream, null);
+
+    await execa('git', ['remote', 'add', 'origin', 'https://usuario:ghp_SECRETO@github.com/acme/web-app.git'], { cwd: repoPath });
+    await writeFile(path.join(repoPath, 'nuevo.txt'), 'x');
+    try {
+      const res = await api<ProjectInfo>('GET', '/api/project');
+      info = res.body;
+      assert.equal(info.changes, 1);
+      assert.equal(info.remote?.url, 'https://github.com/acme/web-app.git');
+      assert.deepEqual(info.remote?.github, { owner: 'acme', repo: 'web-app', url: 'https://github.com/acme/web-app' });
+      assert.ok(!JSON.stringify(res.body).includes('SECRETO'));
+    } finally {
+      await execa('git', ['remote', 'remove', 'origin'], { cwd: repoPath });
+      await rm(path.join(repoPath, 'nuevo.txt'));
+    }
+  });
+
+  test('cuenta de GitHub: estado, login por terminal y logout', async () => {
+    let status = (await api<GitHubAuthStatus>('GET', '/api/github/status')).body;
+    assert.equal(status.installed, true);
+    assert.equal(status.version, '2.89.0');
+    assert.equal(status.loggedIn, false);
+
+    const login = (await api<AgentRunInfo>('POST', '/api/github/login')).body;
+    await readStream(`/api/agents/${login.id}/stream`, (evs) =>
+      evs.some((e) => e.type === 'output' && e.data.includes('ABCD-1234')),
+    );
+    await api('POST', `/api/agents/${login.id}/input`, { data: '\r' });
+    assert.match((await readStream(`/api/agents/${login.id}/stream`)).output, /Logged in as hiroshitomi/);
+
+    status = (await api<GitHubAuthStatus>('GET', '/api/github/status')).body;
+    assert.equal(status.loggedIn, true);
+    assert.equal(status.login, 'hiroshitomi');
+    assert.equal(status.tokenSource, 'keyring');
+
+    status = (await api<GitHubAuthStatus>('POST', '/api/github/logout')).body;
+    assert.equal(status.loggedIn, false);
+  });
+
+  test('uso de la suscripción: la status line real de Claude reporta a ADE', async () => {
+    // El comando exacto que ADE pasa a Claude Code con --settings.
+    const args = defaultAgentPresets.claude!.args('hola');
+    assert.equal(args[0], '--settings');
+    assert.equal(args.at(-1), 'hola');
+    const command = (JSON.parse(args[1]!) as { statusLine: { command: string } }).statusLine.command;
+
+    const resets5h = Math.floor(Date.now() / 1000) + 3600;
+    const resets7d = Math.floor(Date.now() / 1000) + 3 * 86400;
+    const sessionJson = JSON.stringify({
+      model: { display_name: 'Opus' },
+      rate_limits: {
+        five_hour: { used_percentage: 23.5, resets_at: resets5h },
+        seven_day: { used_percentage: 41.2, resets_at: resets7d },
+      },
+    });
+
+    const events = readStream<AdeEvent>('/api/events', (evs) =>
+      evs.some((e) => e.type === 'usage' && e.usage.fiveHour?.usedPercentage === 23.5),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    // Claude Code ejecuta la status line con sh, pasando el JSON por stdin.
+    const line = await execa('sh', ['-c', command], {
+      input: sessionJson,
+      env: { ADE_USAGE_URL: `${base}/api/usage/report`, ADE_USAGE_TOKEN: USAGE_TOKEN },
+    });
+    assert.equal(line.stdout, 'ADE · Opus · 5h 24% · semana 41%');
+    await events; // llegó por /api/events
+
+    const current = (await api<ClaudeUsage>('GET', '/api/usage')).body;
+    assert.equal(current.fiveHour?.usedPercentage, 23.5);
+    assert.equal(current.fiveHour?.resetsAt, new Date(resets5h * 1000).toISOString());
+    assert.equal(current.sevenDay?.usedPercentage, 41.2);
+    assert.ok(current.updatedAt);
+
+    // Sin el token correcto no se acepta (cualquier proceso local podría intentarlo).
+    const forged = await api('POST', '/api/usage/report', { fiveHour: null, sevenDay: null }, { 'x-ade-token': 'otro' });
+    assert.equal(forged.status, 403);
+
+    // Persistido en disco y con caducidad: pasado el reinicio, la ventana se vacía.
+    const reloaded = new UsageService(path.join(tmp, 'usage.json'));
+    await reloaded.load();
+    assert.equal(reloaded.get().sevenDay?.usedPercentage, 41.2);
+    assert.equal(reloaded.get(Date.now() + 2 * 3600 * 1000).fiveHour, null);
   });
 
   test('Claude Code no instalado', async () => {
