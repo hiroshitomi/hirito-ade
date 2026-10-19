@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+@import '@xterm/xterm/css/xterm.css';
+@import 'diff2html/bundles/css/diff2html.min.css';
+
+/* diff2html trae fondos claros fijos en algunos contenedores: los alineamos al tema. */
+.d2h-wrapper {
+  --d2h-dark-bg-color: var(--color-zinc-950);
+  --d2h-dark-border-color: var(--color-zinc-800);
+}
+.d2h-file-wrapper {
+  margin-bottom: 1rem;
+}

@@ -44,6 +44,7 @@ describe('GitWorktreeService', () => {
     assert.match(wt.id, /^anadir-feature-x-[0-9a-f]{6}$/);
     assert.equal(wt.branch, `ade/${wt.id}`);
     assert.equal(wt.baseBranch, 'main');
+    assert.equal(wt.title, 'Añadir feature X');
     assert.ok(wt.managed && !wt.isMain);
     assert.ok(existsSync(path.join(wt.path, 'README.md')));
 

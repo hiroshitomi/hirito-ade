@@ -4,6 +4,8 @@ export interface WorktreeInfo {
   /** Identificador estable y URL-safe (= nombre de la carpeta del worktree). */
   id: string;
   path: string;
+  /** Nombre legible con el que se creó la tarea. */
+  title: string | null;
   /** null si el worktree está en detached HEAD. */
   branch: string | null;
   head: string;
@@ -25,6 +27,9 @@ export interface WorktreeStatus {
 }
 
 export type WorktreeWithStatus = WorktreeInfo & { status: WorktreeStatus | null };
+
+/** Respuesta de GET /api/worktrees y GET /api/worktrees/:id. */
+export type WorktreeSummary = WorktreeWithStatus & { agentRunning: boolean };
 
 export interface CreateWorktreeInput {
   /** Nombre legible de la tarea; se usa para generar id y rama. */
@@ -64,6 +69,16 @@ export interface MergeWorktreeInput {
   commitPending?: boolean;
   /** Elimina worktree + rama tras fusionar. Default: true. */
   removeAfter?: boolean;
+}
+
+export interface MergeWorktreeRequest extends MergeWorktreeInput {
+  id: string;
+}
+
+export interface ApiErrorBody {
+  error: string;
+  message: string;
+  details?: unknown;
 }
 
 export interface MergeResult {

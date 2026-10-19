@@ -26,11 +26,16 @@ ade/
     │   │       ├── worktrees.ts      # Fase 1: REST
     │   │       └── agents.ts         # Fase 2: SSE /api/agents/:id/stream
     │   └── test/
-    └── web/                  # @ade/web — React + Vite + Tailwind (Fase 3)
+    └── web/                  # @ade/web — React + Vite + Tailwind
         └── src/
-            ├── api/          # cliente REST + EventSource tipado con @ade/shared
-            ├── components/   # TaskCard, Terminal (xterm), DiffViewer
-            └── views/        # Dashboard, TaskDetail
+            ├── api/client.ts         # cliente REST tipado con @ade/shared
+            ├── hooks/usePolling.ts
+            └── components/
+                ├── Board.tsx         # Kanban: En curso / Para revisar / Sin cambios
+                ├── NewTaskDialog.tsx # crea worktree + lanza agente
+                ├── TaskDetail.tsx    # terminal, cambios, fusionar, descartar
+                ├── AgentTerminal.tsx # xterm.js ← SSE, teclado → POST /input
+                └── DiffViewer.tsx    # diff2html (carga diferida)
 ```
 
 Capas: `routes` (HTTP, validación) → `services` (lógica de dominio, sin Fastify) → git / procesos.
@@ -57,7 +62,11 @@ Seguridad: escucha solo en loopback, exige `Host` local y `Origin` en lista blan
 
 ```bash
 npm install
-ADE_REPO=/ruta/a/tu/repo npm run dev:server   # http://127.0.0.1:4317/api/health
+ADE_REPO=/ruta/a/tu/repo npm run dev   # server (:4317) + dashboard en http://localhost:5173
 npm test
 npm run typecheck
 ```
+
+`ADE_REPO` es el repositorio sobre el que trabajarán los agentes (no este proyecto).
+Las columnas del tablero se derivan del estado real: agente en ejecución → *En curso*;
+commits o cambios sin fusionar → *Para revisar*; nada → *Sin cambios*.

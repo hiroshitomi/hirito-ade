@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { CreateWorktreeInput, MergeWorktreeInput } from '@ade/shared';
+import type { CreateWorktreeInput, MergeWorktreeRequest, WorktreeSummary } from '@ade/shared';
 import { AdeError } from '../lib/errors.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
 import type { GitWorktreeService } from '../services/GitWorktreeService.js';
@@ -40,13 +40,13 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
   app.get<{ Querystring: { all?: boolean } }>(
     '/',
     { schema: { querystring: { type: 'object', properties: { all: { type: 'boolean' } } } } },
-    async (req) => {
+    async (req): Promise<WorktreeSummary[]> => {
       const list = await git.listWithStatus({ managedOnly: !req.query.all });
       return list.map((w) => ({ ...w, agentRunning: agents.isRunningFor(w.id) }));
     },
   );
 
-  app.get<{ Params: { id: string } }>('/:id', { schema: { params: idParams } }, async (req) => {
+  app.get<{ Params: { id: string } }>('/:id', { schema: { params: idParams } }, async (req): Promise<WorktreeSummary> => {
     const wt = await git.get(req.params.id);
     return { ...wt, status: await git.getStatus(wt.id), agentRunning: agents.isRunningFor(wt.id) };
   });
@@ -76,7 +76,7 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
     },
   );
 
-  app.post<{ Body: MergeWorktreeInput & { id: string } }>(
+  app.post<{ Body: MergeWorktreeRequest }>(
     '/merge',
     {
       schema: {

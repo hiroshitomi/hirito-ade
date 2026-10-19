@@ -51,7 +51,9 @@ interface GitRunOptions {
 
 const MIN_GIT_VERSION = [2, 38] as const; // `merge-tree --write-tree`
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const BASE_CONFIG_KEY = 'adeBase';
+// Metadatos por rama en .git/config (branch.<b>.<clave>). git los borra junto con la rama.
+const META_KEYS = { baseBranch: 'adebase', title: 'adetitle' } as const;
+type BranchMeta = Partial<Record<keyof typeof META_KEYS, string>>;
 
 // Entorno determinista: salida parseable y git nunca bloquea pidiendo input.
 const GIT_ENV = {
@@ -106,7 +108,7 @@ export class GitWorktreeService {
   async list(opts: { managedOnly?: boolean } = {}): Promise<WorktreeInfo[]> {
     const { stdout } = await this.git(['worktree', 'list', '--porcelain', '-z']);
     const records = parseWorktreePorcelain(stdout);
-    const bases = await this.readBaseBranches();
+    const meta = await this.readBranchMeta();
 
     const all = records.map((r, i): WorktreeInfo => {
       const managed = isInside(this.worktreesDir, r.path);
@@ -115,7 +117,8 @@ export class GitWorktreeService {
         path: r.path,
         branch: r.branch,
         head: r.head,
-        baseBranch: r.branch ? (bases.get(r.branch) ?? null) : null,
+        title: (r.branch && meta.get(r.branch)?.title) || null,
+        baseBranch: (r.branch && meta.get(r.branch)?.baseBranch) || null,
         isMain: i === 0,
         managed,
         locked: r.locked,
@@ -200,8 +203,9 @@ export class GitWorktreeService {
       await this.git(['worktree', 'add', '-b', branch, wtPath, baseRef]);
       // Solo guardamos la base si es una rama: es contra lo que se fusionará después.
       if (await this.refExists(`refs/heads/${baseRef}`)) {
-        await this.git(['config', '--local', `branch.${branch}.${BASE_CONFIG_KEY}`, baseRef]);
+        await this.git(['config', '--local', `branch.${branch}.${META_KEYS.baseBranch}`, baseRef]);
       }
+      await this.git(['config', '--local', `branch.${branch}.${META_KEYS.title}`, input.name.trim()]);
       return this.get(id);
     });
   }
@@ -393,20 +397,27 @@ export class GitWorktreeService {
     return wt.baseBranch;
   }
 
-  private async readBaseBranches(): Promise<Map<string, string>> {
-    // Exit 1 = ninguna clave coincide.
-    const { stdout } = await this.git(
-      // git normaliza el nombre de la variable a minúsculas (el de la rama no).
-      ['config', '--local', '-z', '--get-regexp', `^branch\\..*\\.${BASE_CONFIG_KEY.toLowerCase()}$`],
-      { allowExitCodes: [1] },
-    );
-    const map = new Map<string, string>();
+  private async readBranchMeta(): Promise<Map<string, BranchMeta>> {
+    // Exit 1 = ninguna clave coincide. git normaliza el nombre de la variable a
+    // minúsculas (el de la rama no), por eso META_KEYS va en minúsculas.
+    const vars = Object.values(META_KEYS).join('|');
+    const { stdout } = await this.git(['config', '--local', '-z', '--get-regexp', `^branch\\..*\\.(${vars})$`], {
+      allowExitCodes: [1],
+    });
+    const fields = Object.fromEntries(Object.entries(META_KEYS).map(([field, v]) => [v, field])) as Record<
+      string,
+      keyof BranchMeta
+    >;
+    const map = new Map<string, BranchMeta>();
     for (const entry of splitZ(stdout)) {
-      // Formato -z: "<clave>\n<valor>". La clave conserva mayúsculas en el nombre de rama.
+      // Formato -z: "<clave>\n<valor>".
       const nl = entry.indexOf('\n');
       const key = entry.slice(0, nl);
-      const branch = key.slice('branch.'.length, key.length - BASE_CONFIG_KEY.length - 1);
-      map.set(branch, entry.slice(nl + 1));
+      const dot = key.lastIndexOf('.');
+      const branch = key.slice('branch.'.length, dot);
+      const field = fields[key.slice(dot + 1)];
+      if (!field) continue;
+      map.set(branch, { ...map.get(branch), [field]: entry.slice(nl + 1) });
     }
     return map;
   }

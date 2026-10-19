@@ -43,6 +43,8 @@ export class AgentNotRunningError extends AdeError {
   }
 }
 
+const EXIT_DRAIN_MS = 50;
+
 interface Chunk {
   seq: number;
   data: string;
@@ -78,26 +80,39 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent] }> {
       endedAt: null,
     };
 
+    let finalize: (() => void) | null = null;
     proc.onData((data) => {
       this.pending += data;
       this.flushTimer ??= setTimeout(() => this.flush(), this.flushIntervalMs);
+      finalize?.(); // aún llega salida tras onExit: reinicia la espera de drenaje
     });
 
     this.exited = new Promise((resolve) => {
       proc.onExit(({ exitCode, signal }) => {
-        this.flush();
-        if (this.killTimer) clearTimeout(this.killTimer);
-        this.info = {
-          ...this.info,
-          status: this.stopRequested ? 'stopped' : 'exited',
-          exitCode,
-          signal: signal ?? null,
-          endedAt: new Date().toISOString(),
+        // node-pty puede emitir onExit antes que los últimos onData. Esperamos a que
+        // el PTY lleve EXIT_DRAIN_MS sin datos para no perder el final de la salida.
+        let drainTimer: NodeJS.Timeout | undefined;
+        finalize = () => {
+          clearTimeout(drainTimer);
+          drainTimer = setTimeout(() => this.finish(exitCode, signal, resolve), EXIT_DRAIN_MS);
         };
-        this.emit('event', { type: 'exit', run: this.info });
-        resolve();
+        finalize();
       });
     });
+  }
+
+  private finish(exitCode: number, signal: number | undefined, resolve: () => void): void {
+    this.flush();
+    if (this.killTimer) clearTimeout(this.killTimer);
+    this.info = {
+      ...this.info,
+      status: this.stopRequested ? 'stopped' : 'exited',
+      exitCode,
+      signal: signal ?? null,
+      endedAt: new Date().toISOString(),
+    };
+    this.emit('event', { type: 'exit', run: this.info });
+    resolve();
   }
 
   get running(): boolean {
