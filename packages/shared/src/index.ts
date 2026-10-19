@@ -146,3 +146,24 @@ export type AgentStreamEvent =
 
 /** Eventos SSE de GET /api/events: cambios de estado de cualquier agente. */
 export type AdeEvent = { type: 'agent'; run: AgentRunInfo };
+
+// -----------------------------------------------------------------------------
+// Cuenta de Claude (suscripción)
+// -----------------------------------------------------------------------------
+
+export interface ClaudeAuthStatus {
+  /** El comando `claude` existe en el PATH del servidor. */
+  installed: boolean;
+  version: string | null;
+  loggedIn: boolean;
+  /** Tal como lo reporta `claude auth status` (p.ej. 'claude.ai', 'oauth_token', 'api_key'). */
+  authMethod: string | null;
+  /** true si los agentes consumirán tu suscripción y no facturación por API. */
+  usesSubscription: boolean;
+  email: string | null;
+  subscriptionType: string | null;
+  orgName: string | null;
+  /** Variables de API definidas en el entorno del servidor que ADE quita a los agentes. */
+  ignoredEnvVars: string[];
+  error: string | null;
+}

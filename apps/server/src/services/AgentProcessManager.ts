@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import * as pty from 'node-pty';
 import type { AgentActivity, AgentPresetInfo, AgentRunInfo, AgentStreamEvent } from '@ade/shared';
-import type { AgentPreset } from '../config.js';
+import { childEnv, type AgentPreset } from '../config.js';
 import { AdeError, InvalidInputError } from '../lib/errors.js';
 
 export interface AgentProcessManagerOptions {
@@ -209,7 +209,15 @@ export class AgentProcessManager {
   }
 
   listPresets(): AgentPresetInfo[] {
-    return Object.entries(this.presets).map(([id, p]) => ({ id, label: p.label, acceptsPrompt: p.acceptsPrompt }));
+    return Object.entries(this.presets)
+      .filter(([, p]) => !p.hidden)
+      .map(([id, p]) => ({ id, label: p.label, acceptsPrompt: p.acceptsPrompt }));
+  }
+
+  /** Presets que la API pública puede lanzar (excluye los internos, como el login). */
+  isPublicPreset(id: string): boolean {
+    const preset = this.presets[id];
+    return preset !== undefined && !preset.hidden;
   }
 
   start(opts: StartAgentOptions): AgentRunInfo {
@@ -227,14 +235,13 @@ export class AgentProcessManager {
         cwd: opts.cwd,
         cols: opts.cols ?? 120,
         rows: opts.rows ?? 32,
-        env: {
-          ...process.env,
+        env: childEnv(preset.unsetEnv, {
           TERM: 'xterm-256color',
           COLORTERM: 'truecolor',
           ADE_WORKTREE_ID: opts.worktreeId,
           ADE_AGENT_ID: id,
           ...opts.env,
-        } as Record<string, string>,
+        }),
       });
     } catch (err) {
       throw new AdeError(`No se pudo lanzar '${preset.command}': ${(err as Error).message}`, 'AGENT_SPAWN_FAILED', 500);

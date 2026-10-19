@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
 import type { AgentRunInfo, AgentStreamEvent } from '@ade/shared';
@@ -39,6 +40,8 @@ export function AgentTerminal({ run, onExit, fontSize = 13 }: Props) {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // URLs clicables (p.ej. la de autorización del login de Claude). Nueva pestaña, sin acceso a esta.
+    term.loadAddon(new WebLinksAddon((_e, uri) => window.open(uri, '_blank', 'noopener,noreferrer')));
     term.open(el);
     fit.fit();
 

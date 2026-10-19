@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { AgentStreamEvent, StartAgentInput } from '@ade/shared';
+import { InvalidInputError } from '../lib/errors.js';
 import { openSse } from '../lib/sse.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
 import type { GitWorktreeService } from '../services/GitWorktreeService.js';
@@ -47,6 +48,9 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesDeps> = async (app, { gi
       },
     },
     async (req, reply) => {
+      if (!agents.isPublicPreset(req.body.preset)) {
+        throw new InvalidInputError(`Preset desconocido: '${req.body.preset}'`);
+      }
       // El cwd sale siempre del servicio git, nunca del cliente.
       const wt = await git.get(req.body.worktreeId);
       const run = agents.start({ ...req.body, worktreeId: wt.id, cwd: wt.path });

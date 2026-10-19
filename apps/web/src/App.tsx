@@ -1,8 +1,9 @@
 import { Bell, BellOff, CheckCircle2, FolderGit2, Grid2x2, KanbanSquare, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { AgentPresetInfo, AgentRunInfo, MergeResult } from '@ade/shared';
+import type { AgentPresetInfo, AgentRunInfo, ClaudeAuthStatus, MergeResult } from '@ade/shared';
 import { api, errorMessage } from './api/client';
 import { Board } from './components/Board';
+import { ClaudeAccountChip, ClaudeAccountDialog } from './components/ClaudeAccount';
 import { NewTaskDialog } from './components/NewTaskDialog';
 import { TaskDetail } from './components/TaskDetail';
 import { TerminalGrid } from './components/TerminalGrid';
@@ -28,10 +29,13 @@ export function App() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [view, setView] = useState<View>(loadView);
+  const [claude, setClaude] = useState<ClaudeAuthStatus | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
   const notifications = useNotifications();
 
   useEffect(() => {
     api.listPresets().then(setPresets).catch(() => undefined);
+    api.claudeStatus().then(setClaude).catch(() => undefined);
     fetch('/api/health')
       .then((r) => r.json() as Promise<Health>)
       .then(setHealth)
@@ -57,7 +61,8 @@ export function App() {
   const handleWaiting = useCallback(
     (run: AgentRunInfo) => {
       const wt = worktrees?.find((w) => w.id === run.worktreeId);
-      const title = wt ? taskTitle(wt) : run.worktreeId;
+      if (!wt) return; // p.ej. la terminal del login de Claude: no es una tarea
+      const title = taskTitle(wt);
       notifications.notify(`ADE · ${title}`, 'El agente espera tu respuesta', run.id, () => setOpenId(run.worktreeId));
     },
     [worktrees, notifications],
@@ -100,6 +105,7 @@ export function App() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <ClaudeAccountChip status={claude} onClick={() => setAccountOpen(true)} />
           {waitingCount > 0 ? (
             <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-medium text-amber-300">
               {waitingCount} te {waitingCount === 1 ? 'espera' : 'esperan'}
@@ -153,6 +159,8 @@ export function App() {
       {creating ? (
         <NewTaskDialog
           presets={presets}
+          claude={claude}
+          onConnectClaude={() => setAccountOpen(true)}
           onClose={() => setCreating(false)}
           onCreated={async (wt) => {
             setCreating(false);
@@ -177,6 +185,10 @@ export function App() {
             void refresh();
           }}
         />
+      ) : null}
+
+      {accountOpen ? (
+        <ClaudeAccountDialog status={claude} onStatus={setClaude} onClose={() => setAccountOpen(false)} />
       ) : null}
 
       {toast ? (

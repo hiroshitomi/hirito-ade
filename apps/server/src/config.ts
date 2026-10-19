@@ -6,6 +6,25 @@ export interface AgentPreset {
   /** Construye los argumentos a partir del prompt opcional. */
   args: (prompt: string | undefined) => string[];
   acceptsPrompt: boolean;
+  /** Variables de entorno que se eliminan antes de lanzar el proceso. */
+  unsetEnv?: readonly string[];
+  /** Uso interno (p.ej. el login de Claude): no se lista ni se puede lanzar por POST /api/agents. */
+  hidden?: boolean;
+}
+
+/**
+ * Con cualquiera de estas variables, Claude Code factura por API en vez de usar
+ * la suscripción con la que iniciaste sesión. Se quitan siempre que ADE ejecuta `claude`.
+ */
+export const CLAUDE_API_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
+
+/** Entorno para un proceso hijo: el del servidor menos `unset`, más `extra`. */
+export function childEnv(unset: readonly string[] = [], extra: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && !unset.includes(k)) env[k] = v;
+  }
+  return { ...env, ...extra };
 }
 
 /**
@@ -18,6 +37,7 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
     command: 'claude',
     args: (prompt) => (prompt ? [prompt] : []),
     acceptsPrompt: true,
+    unsetEnv: CLAUDE_API_ENV_VARS,
   },
   codex: {
     label: 'Codex CLI',
@@ -30,6 +50,15 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
     command: process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash'),
     args: () => [],
     acceptsPrompt: false,
+  },
+  // Flujo oficial de login con la suscripción (OAuth en el navegador). Lo lanza /api/claude/login.
+  'claude-login': {
+    label: 'Iniciar sesión en Claude',
+    command: 'claude',
+    args: () => ['auth', 'login', '--claudeai'],
+    acceptsPrompt: false,
+    unsetEnv: CLAUDE_API_ENV_VARS,
+    hidden: true,
   },
 };
 

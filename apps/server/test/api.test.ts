@@ -4,10 +4,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { execa } from 'execa';
-import type { AdeEvent, AgentRunInfo, AgentStreamEvent, WorktreeInfo, WorktreeSummary } from '@ade/shared';
+import type {
+  AdeEvent,
+  AgentPresetInfo,
+  AgentRunInfo,
+  AgentStreamEvent,
+  ClaudeAuthStatus,
+  WorktreeInfo,
+  WorktreeSummary,
+} from '@ade/shared';
 import { buildApp } from '../src/app.js';
 import type { AgentPreset } from '../src/config.js';
 import { AgentProcessManager } from '../src/services/AgentProcessManager.js';
+import { ClaudeAuthService } from '../src/services/ClaudeAuthService.js';
 import { GitWorktreeService } from '../src/services/GitWorktreeService.js';
 
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
@@ -27,12 +36,41 @@ const presets: Record<string, AgentPreset> = {
   writer: { label: 'writer', command: 'bash', args: (p) => ['-c', `echo "${p}" > agent.txt; echo done`], acceptsPrompt: true },
   sleeper: bash('sleeper', 'sleep 30'),
   stubborn: bash('stubborn', "trap '' TERM; echo ready; while true; do sleep 0.1; done"),
+  envcheck: {
+    ...bash('envcheck', 'echo "key=[$ANTHROPIC_API_KEY] home=[${HOME:+ok}]"; sleep 0.2'),
+    unsetEnv: ['ANTHROPIC_API_KEY'],
+  },
 };
+
+// `claude` falso: imita `--version`, `auth status --json` y `auth login`. Si ve
+// ANTHROPIC_API_KEY responde como Claude Code (método api_key), así el test
+// comprueba que ADE la quita del entorno.
+const FAKE_CLAUDE = `#!/usr/bin/env bash
+case "$1 $2" in
+  "--version "*) echo "9.9.9 (Claude Code)" ;;
+  "auth status")
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+      echo '{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty","apiKeySource":"ANTHROPIC_API_KEY"}'
+    elif [ -f "$FAKE_CLAUDE_STATE" ]; then
+      echo '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"dev@example.com","subscriptionType":"max"}'
+    else
+      echo '{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}'
+    fi ;;
+  "auth login")
+    echo "Abre esta URL para iniciar sesión: https://claude.ai/oauth/authorize?code=true"
+    printf "Pega el código aquí: "; read -r code
+    [ "$3" = "--claudeai" ] && [ "$code" = "abc123" ] && touch "$FAKE_CLAUDE_STATE" && echo "Login successful"
+    sleep 0.2 ;;
+  "auth logout") rm -f "$FAKE_CLAUDE_STATE" ;;
+esac
+`;
 
 let tmp: string;
 let base: string;
 let app: ReturnType<typeof buildApp>;
 let agents: AgentProcessManager;
+let claude: ClaudeAuthService;
+let fakeClaude: string;
 
 async function api<T = unknown>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}) {
   const res = await fetch(`${base}${url}`, {
@@ -98,8 +136,20 @@ before(async () => {
   await execa('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-qm', 'readme'], { cwd: repo });
 
   const git = await GitWorktreeService.create({ repoPath: repo, worktreesDir: path.join(tmp, 'wts') });
+  fakeClaude = path.join(tmp, 'fake-claude');
+  await writeFile(fakeClaude, FAKE_CLAUDE, { mode: 0o755 });
+  process.env.FAKE_CLAUDE_STATE = path.join(tmp, 'claude-logged-in');
+  presets['claude-login'] = {
+    label: 'login',
+    command: fakeClaude,
+    args: () => ['auth', 'login', '--claudeai'],
+    acceptsPrompt: false,
+    unsetEnv: ['ANTHROPIC_API_KEY'],
+    hidden: true,
+  };
   agents = new AgentProcessManager({ presets, killTimeoutMs: 300, idleMs: 300 });
-  app = buildApp({ git, agents, allowedOrigins: ['http://localhost:5173'], logger: false });
+  claude = new ClaudeAuthService({ agents, command: fakeClaude });
+  app = buildApp({ git, agents, claude, allowedOrigins: ['http://localhost:5173'], logger: false });
   await app.listen({ port: 0, host: '127.0.0.1' });
   const addr = app.server.address();
   base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
@@ -212,6 +262,67 @@ describe('API', () => {
     assert.equal(final.status, 'exited');
     assert.equal(final.activity, null);
     await api('DELETE', `/api/worktrees/${wt.id}`);
+  });
+
+  test('los agentes de Claude no reciben ANTHROPIC_API_KEY', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-de-prueba';
+    try {
+      const wt = await createWorktree('sin api key');
+      const run = await startAgent(wt.id, 'envcheck');
+      await waitFor(async () => agents.get(run.id).status === 'exited');
+      const { output } = await readStream(`/api/agents/${run.id}/stream`);
+      assert.match(output, /key=\[\] home=\[ok\]/); // se quita solo esa variable, el resto se hereda
+      await api('DELETE', `/api/worktrees/${wt.id}`);
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  test('estado y login de Claude con la suscripción', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-de-prueba';
+    try {
+      let status = (await api<ClaudeAuthStatus>('GET', '/api/claude/status')).body;
+      assert.equal(status.installed, true);
+      assert.equal(status.version, '9.9.9');
+      assert.equal(status.loggedIn, false);
+      assert.deepEqual(status.ignoredEnvVars, ['ANTHROPIC_API_KEY']);
+
+      // El preset de login es interno: ni se lista ni se puede lanzar desde /api/agents.
+      const presetsList = (await api<AgentPresetInfo[]>('GET', '/api/agents/presets')).body;
+      assert.ok(!presetsList.some((p) => p.id === 'claude-login'));
+      const wt = await createWorktree('preset oculto');
+      assert.equal((await api('POST', '/api/agents', { worktreeId: wt.id, preset: 'claude-login' })).status, 400);
+      await api('DELETE', `/api/worktrees/${wt.id}`);
+
+      const login = await api<AgentRunInfo>('POST', '/api/claude/login');
+      assert.equal(login.status, 201);
+      // Un segundo clic no abre otro login: devuelve el que está en curso.
+      assert.equal((await api<AgentRunInfo>('POST', '/api/claude/login')).body.id, login.body.id);
+      await readStream(`/api/agents/${login.body.id}/stream`, (evs) =>
+        evs.some((e) => e.type === 'output' && e.data.includes('Pega el código')),
+      );
+      await api('POST', `/api/agents/${login.body.id}/input`, { data: 'abc123\r' });
+      const { output } = await readStream(`/api/agents/${login.body.id}/stream`);
+      assert.match(output, /Login successful/);
+
+      status = (await api<ClaudeAuthStatus>('GET', '/api/claude/status')).body;
+      assert.equal(status.loggedIn, true);
+      assert.equal(status.usesSubscription, true); // con la API key presente en el server, aun así
+      assert.equal(status.email, 'dev@example.com');
+      assert.equal(status.subscriptionType, 'max');
+
+      status = (await api<ClaudeAuthStatus>('POST', '/api/claude/logout')).body;
+      assert.equal(status.loggedIn, false);
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  test('Claude Code no instalado', async () => {
+    const missing = new ClaudeAuthService({ agents, command: path.join(tmp, 'no-existe') });
+    const status = await missing.status();
+    assert.equal(status.installed, false);
+    assert.equal(status.loggedIn, false);
   });
 
   test('validación y seguridad', async () => {

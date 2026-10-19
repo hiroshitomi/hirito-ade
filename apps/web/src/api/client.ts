@@ -2,6 +2,7 @@ import type {
   AgentPresetInfo,
   AgentRunInfo,
   ApiErrorBody,
+  ClaudeAuthStatus,
   CreateWorktreeInput,
   MergeResult,
   MergeWorktreeRequest,
@@ -60,6 +61,10 @@ export const api = {
   resize: (id: string, cols: number, rows: number) =>
     request<void>('POST', `/api/agents/${id}/resize`, { cols, rows }),
   streamUrl: (id: string) => `/api/agents/${id}/stream`,
+
+  claudeStatus: () => request<ClaudeAuthStatus>('GET', '/api/claude/status'),
+  claudeLogin: () => request<AgentRunInfo>('POST', '/api/claude/login'),
+  claudeLogout: () => request<ClaudeAuthStatus>('POST', '/api/claude/logout'),
 };
 
 export function errorMessage(err: unknown): string {

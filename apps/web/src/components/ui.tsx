@@ -24,16 +24,18 @@ export function Button({
   );
 }
 
+const MODAL_WIDTH = { md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-3xl' } as const;
+
 export function Modal({
   title,
   onClose,
   children,
-  wide = false,
+  size = 'md',
 }: {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
-  wide?: boolean;
+  size?: 'md' | 'lg' | 'xl';
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -46,7 +48,7 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        className={`w-full rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl ${wide ? 'max-w-lg' : 'max-w-md'}`}
+        className={`w-full rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl ${MODAL_WIDTH[size]}`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">

@@ -1,6 +1,7 @@
 import { buildApp } from './app.js';
 import { config, defaultAgentPresets } from './config.js';
 import { AgentProcessManager } from './services/AgentProcessManager.js';
+import { ClaudeAuthService } from './services/ClaudeAuthService.js';
 import { GitWorktreeService } from './services/GitWorktreeService.js';
 
 if (!config.repoPath) {
@@ -14,7 +15,9 @@ const git = await GitWorktreeService.create({ repoPath: config.repoPath, worktre
 await git.prune();
 const agents = new AgentProcessManager({ presets: defaultAgentPresets });
 
-const app = buildApp({ git, agents, allowedOrigins: config.allowedOrigins });
+const claude = new ClaudeAuthService({ agents });
+
+const app = buildApp({ git, agents, claude, allowedOrigins: config.allowedOrigins });
 
 // Al cerrar el server, no dejar agentes huérfanos.
 let shuttingDown = false;

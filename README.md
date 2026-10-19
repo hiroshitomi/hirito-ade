@@ -56,6 +56,8 @@ Los servicios no conocen HTTP; las rutas no conocen git.
 | GET | `/api/agents/:id/stream` | SSE `output`/`exit`, reanudable con `Last-Event-ID` |
 | POST | `/api/agents/:id/input` · `/resize` · `/stop` | Teclado de xterm · tamaño · SIGTERM→SIGKILL |
 | GET | `/api/events` | SSE global: cambios de estado de los agentes (`working` / `waiting` / fin) |
+| GET | `/api/claude/status` | Sesión de Claude Code: instalada, con sesión, ¿usa la suscripción? |
+| POST | `/api/claude/login` · `/logout` | Login oficial (`claude auth login --claudeai`) en una terminal · cerrar sesión |
 
 Seguridad: escucha solo en loopback, exige `Host` local y `Origin` en lista blanca
 (`ADE_ALLOWED_ORIGINS`), y solo ejecuta comandos de presets — nunca uno enviado por HTTP.
@@ -78,6 +80,16 @@ Claude Code redibujan un spinner mientras trabajan, así que el silencio indica 
 una confirmación o terminaron su turno). Se marca con borde ámbar parpadeante en el tablero
 y en la vista *Terminales*, un contador en el título de la pestaña y, si las activas, una
 notificación del navegador.
+
+## Claude con tu suscripción
+
+ADE no usa ninguna API: ejecuta el CLI oficial `claude`, que usa la sesión iniciada en la
+máquina. Desde el indicador de la cabecera (*Conectar Claude* / *Claude · Max*) puedes
+iniciar sesión con tu cuenta Pro/Max: ADE lanza `claude auth login --claudeai` en una
+terminal integrada y nunca ve ni guarda credenciales.
+
+Al ejecutar `claude`, ADE quita del entorno `ANTHROPIC_API_KEY` y `ANTHROPIC_AUTH_TOKEN`:
+con ellas Claude Code facturaría por API en lugar de usar la suscripción.
 
 Limitación conocida de node-pty: bajo carga, a veces se pierde la última salida de un proceso
 que termina justo después de escribirla. No afecta a agentes interactivos de larga duración.

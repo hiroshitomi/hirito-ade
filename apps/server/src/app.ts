@@ -1,21 +1,24 @@
 import Fastify, { type FastifyServerOptions } from 'fastify';
 import { AdeError } from './lib/errors.js';
 import { agentRoutes } from './routes/agents.js';
+import { claudeRoutes } from './routes/claude.js';
 import { eventRoutes } from './routes/events.js';
 import { worktreeRoutes } from './routes/worktrees.js';
 import type { AgentProcessManager } from './services/AgentProcessManager.js';
+import type { ClaudeAuthService } from './services/ClaudeAuthService.js';
 import type { GitWorktreeService } from './services/GitWorktreeService.js';
 
 export interface AppDeps {
   git: GitWorktreeService;
   agents: AgentProcessManager;
+  claude: ClaudeAuthService;
   allowedOrigins: string[];
   logger?: FastifyServerOptions['logger'];
 }
 
 const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
-export function buildApp({ git, agents, allowedOrigins, logger = true }: AppDeps) {
+export function buildApp({ git, agents, claude, allowedOrigins, logger = true }: AppDeps) {
   // removeAdditional: false → campos desconocidos dan 400 en vez de ignorarse en silencio.
   const app = Fastify({ logger, ajv: { customOptions: { removeAdditional: false } } });
 
@@ -48,6 +51,7 @@ export function buildApp({ git, agents, allowedOrigins, logger = true }: AppDeps
   app.register(worktreeRoutes, { prefix: '/api/worktrees', git, agents });
   app.register(agentRoutes, { prefix: '/api/agents', git, agents });
   app.register(eventRoutes, { prefix: '/api/events', agents });
+  app.register(claudeRoutes, { prefix: '/api/claude', claude });
 
   return app;
 }

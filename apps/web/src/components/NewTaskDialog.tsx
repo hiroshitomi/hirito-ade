@@ -1,16 +1,18 @@
 import { Plus } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import type { AgentPresetInfo, WorktreeInfo } from '@ade/shared';
+import type { AgentPresetInfo, ClaudeAuthStatus, WorktreeInfo } from '@ade/shared';
 import { api, errorMessage } from '../api/client';
 import { Button, ErrorText, Field, inputClass, Modal } from './ui';
 
 interface Props {
   presets: AgentPresetInfo[];
+  claude: ClaudeAuthStatus | null;
+  onConnectClaude: () => void;
   onClose: () => void;
   onCreated: (wt: WorktreeInfo) => void;
 }
 
-export function NewTaskDialog({ presets, onClose, onCreated }: Props) {
+export function NewTaskDialog({ presets, claude, onConnectClaude, onClose, onCreated }: Props) {
   const [name, setName] = useState('');
   const [baseRef, setBaseRef] = useState('');
   const [preset, setPreset] = useState(presets[0]?.id ?? '');
@@ -40,7 +42,7 @@ export function NewTaskDialog({ presets, onClose, onCreated }: Props) {
   }
 
   return (
-    <Modal title="Nueva tarea" onClose={onClose} wide>
+    <Modal title="Nueva tarea" onClose={onClose} size="lg">
       <form onSubmit={submit} className="space-y-4">
         <Field label="Nombre de la tarea" hint="Se usa para la rama: ade/<nombre>-<sufijo>">
           <input
@@ -66,6 +68,18 @@ export function NewTaskDialog({ presets, onClose, onCreated }: Props) {
             <option value="">Ninguno (solo crear worktree)</option>
           </select>
         </Field>
+        {preset === 'claude' && claude && !claude.usesSubscription ? (
+          <p className="flex flex-wrap items-center gap-x-2 rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+            {!claude.installed
+              ? 'Claude Code no está instalado en esta máquina.'
+              : !claude.loggedIn
+                ? 'Claude Code no tiene sesión iniciada.'
+                : 'Claude Code está facturando por API, no con tu suscripción.'}
+            <button type="button" className="font-medium underline" onClick={onConnectClaude}>
+              Conectar mi suscripción
+            </button>
+          </p>
+        ) : null}
         {selected?.acceptsPrompt ? (
           <Field label="Instrucciones para el agente" hint="Opcional: también puedes escribirle en la terminal">
             <textarea
