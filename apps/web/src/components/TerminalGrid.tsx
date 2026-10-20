@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { agentState, taskTitle, type AgentState } from '../lib/agentState';
 import { ModeBadge } from './AgentMode';
 import { AgentTerminal } from './AgentTerminal';
-import { CodeState } from './CodeState';
+import { CodeState, RepoBadge } from './CodeState';
 import { Button } from './ui';
 
 /**
@@ -185,6 +185,7 @@ function Pane(props: {
       </div>
       {/* Estado del código de este worktree: cada agente trabaja en su propia rama. */}
       <footer className="flex items-center gap-3 border-t border-zinc-800 bg-zinc-900/70 px-2 py-1">
+        <RepoBadge repo={wt.repo} />
         <span className="flex shrink-0 items-center gap-1 font-mono text-xs text-zinc-500" title={wt.path}>
           <GitBranch className="size-3" />
           {wt.branch} {wt.baseBranch ? `← ${wt.baseBranch}` : ''}

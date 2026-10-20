@@ -37,7 +37,7 @@ export function GitHubAccountDialog({ status, project, onClose, onStatus }: Dial
 
 function githubView(s: GitHubAuthStatus, project: ProjectInfo | null): ConnectionView {
   const { tone } = githubSummary(s);
-  const repo = project?.remote?.github;
+  const repos = project?.repos ?? [];
   const mono = (v: string | null) => (v ? <span className="font-mono text-xs">{v}</span> : null);
   return {
     tone,
@@ -57,16 +57,23 @@ function githubView(s: GitHubAuthStatus, project: ProjectInfo | null): Connectio
       ? [
           ['Cuenta', s.login ? `@${s.login}` : null],
           [
-            'Repositorio',
-            repo ? (
-              <a href={repo.url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">
-                {repo.owner}/{repo.repo}
-              </a>
-            ) : project?.remote ? (
-              <span className="text-zinc-400">el remoto origin no es de GitHub</span>
-            ) : (
-              <span className="text-zinc-400">sin remoto origin</span>
-            ),
+            repos.length > 1 ? 'Repositorios' : 'Repositorio',
+            repos.length ? (
+              <span className="flex flex-col gap-0.5 whitespace-normal">
+                {repos.map((r) => (
+                  <span key={r.name}>
+                    {repos.length > 1 ? <span className="mr-2 text-zinc-500">{r.name}</span> : null}
+                    {r.remote?.github ? (
+                      <a href={r.remote.github.url} target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">
+                        {r.remote.github.owner}/{r.remote.github.repo}
+                      </a>
+                    ) : (
+                      <span className="text-zinc-400">{r.remote ? 'el remoto origin no es de GitHub' : 'sin remoto origin'}</span>
+                    )}
+                  </span>
+                ))}
+              </span>
+            ) : null,
           ],
           ['Protocolo git', mono(s.gitProtocol)],
           ['Token', mono(s.tokenSource)],

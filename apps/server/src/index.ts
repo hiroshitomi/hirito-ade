@@ -1,21 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { buildApp } from './app.js';
 import { config, defaultAgentPresets } from './config.js';
 import { AgentProcessManager } from './services/AgentProcessManager.js';
-import { randomBytes } from 'node:crypto';
 import { ClaudeAuthService } from './services/ClaudeAuthService.js';
 import { GitHubAuthService } from './services/GitHubAuthService.js';
+import { ProjectService } from './services/ProjectService.js';
 import { UsageService } from './services/UsageService.js';
-import { GitWorktreeService } from './services/GitWorktreeService.js';
-
-if (!config.repoPath) {
-  // Sin esto, los agentes trabajarían sobre el propio repositorio de ADE.
-  console.error('Falta ADE_REPO: indica el repositorio sobre el que trabajarán los agentes.\n' +
-    '  Ejemplo: ADE_REPO=/ruta/a/tu/proyecto npm run dev');
-  process.exit(1);
-}
-
-const git = await GitWorktreeService.create({ repoPath: config.repoPath, worktreesDir: config.worktreesDir });
-await git.prune();
 
 const usage = new UsageService(config.usageFile);
 await usage.load();
@@ -30,10 +20,22 @@ const agents = new AgentProcessManager({
   },
 });
 const claude = new ClaudeAuthService({ agents });
+
+// El proyecto se elige desde la UI. ADE_REPO, si existe, lo abre al arrancar;
+// si no, se reabre el último usado (o se muestra la pantalla de bienvenida).
+const project = new ProjectService({ agents, stateFile: config.projectsFile, worktreesRoot: config.worktreesDir });
+await project.loadState();
+if (config.repoPath) {
+  await project.open(config.repoPath).catch((err: Error) => {
+    console.error(`No se pudo abrir ADE_REPO (${config.repoPath}): ${err.message}`);
+  });
+} else {
+  await project.restoreLast();
+}
 const github = new GitHubAuthService({ agents });
 
 const app = buildApp({
-  git,
+  project,
   agents,
   claude,
   github,

@@ -12,7 +12,7 @@ import type {
   ClaudeAuthStatus,
   ClaudeUsage,
   GitHubAuthStatus,
-  ProjectInfo,
+  ProjectState,
   WorktreeInfo,
   WorktreeSummary,
 } from '@ade/shared';
@@ -23,7 +23,7 @@ import { ClaudeAuthService } from '../src/services/ClaudeAuthService.js';
 import { GitHubAuthService } from '../src/services/GitHubAuthService.js';
 import { UsageService } from '../src/services/UsageService.js';
 import { defaultAgentPresets } from '../src/config.js';
-import { GitWorktreeService } from '../src/services/GitWorktreeService.js';
+import { ProjectService } from '../src/services/ProjectService.js';
 
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_NOSYSTEM = '1';
@@ -168,7 +168,6 @@ before(async () => {
   await execa('git', ['add', '-A'], { cwd: repo });
   await execa('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-qm', 'readme'], { cwd: repo });
 
-  const git = await GitWorktreeService.create({ repoPath: repo, worktreesDir: path.join(tmp, 'wts') });
   fakeClaude = path.join(tmp, 'fake-claude');
   await writeFile(fakeClaude, FAKE_CLAUDE, { mode: 0o755 });
   process.env.FAKE_CLAUDE_STATE = path.join(tmp, 'claude-logged-in');
@@ -191,11 +190,13 @@ before(async () => {
     hidden: true,
   };
   agents = new AgentProcessManager({ presets, killTimeoutMs: 300, idleMs: 300 });
+  const project = new ProjectService({ agents, stateFile: path.join(tmp, 'projects.json'), worktreesRoot: path.join(tmp, 'wts') });
+  await project.open(repo);
   claude = new ClaudeAuthService({ agents, command: fakeClaude });
   const github = new GitHubAuthService({ agents, command: fakeGh });
   usage = new UsageService(path.join(tmp, 'usage.json'));
   app = buildApp({
-    git,
+    project,
     agents,
     claude,
     github,
@@ -374,7 +375,10 @@ describe('API', () => {
   });
 
   test('información del proyecto: rama, cambios y remoto sin credenciales', async () => {
-    let info = (await api<ProjectInfo>('GET', '/api/project')).body;
+    const state = (await api<ProjectState>('GET', '/api/project')).body;
+    assert.equal(state.project?.kind, 'repo');
+    assert.equal(state.project?.repos.length, 1);
+    let info = state.project!.repos[0]!;
     assert.equal(info.name, 'repo');
     assert.equal(info.branch, 'main');
     assert.equal(info.remote, null);
@@ -383,8 +387,8 @@ describe('API', () => {
     await execa('git', ['remote', 'add', 'origin', 'https://usuario:ghp_SECRETO@github.com/acme/web-app.git'], { cwd: repoPath });
     await writeFile(path.join(repoPath, 'nuevo.txt'), 'x');
     try {
-      const res = await api<ProjectInfo>('GET', '/api/project');
-      info = res.body;
+      const res = await api<ProjectState>('GET', '/api/project');
+      info = res.body.project!.repos[0]!;
       assert.equal(info.changes, 1);
       assert.equal(info.remote?.url, 'https://github.com/acme/web-app.git');
       assert.deepEqual(info.remote?.github, { owner: 'acme', repo: 'web-app', url: 'https://github.com/acme/web-app' });

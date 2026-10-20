@@ -11,10 +11,11 @@ import type { AgentProcessManager } from './services/AgentProcessManager.js';
 import type { ClaudeAuthService } from './services/ClaudeAuthService.js';
 import type { GitHubAuthService } from './services/GitHubAuthService.js';
 import type { UsageService } from './services/UsageService.js';
-import type { GitWorktreeService } from './services/GitWorktreeService.js';
+import type { pickFolder } from './lib/folderPicker.js';
+import type { ProjectService } from './services/ProjectService.js';
 
 export interface AppDeps {
-  git: GitWorktreeService;
+  project: ProjectService;
   agents: AgentProcessManager;
   claude: ClaudeAuthService;
   github: GitHubAuthService;
@@ -22,12 +23,14 @@ export interface AppDeps {
   usageReportToken: string;
   allowedOrigins: string[];
   logger?: FastifyServerOptions['logger'];
+  /** Para tests: sustituye al diálogo nativo de carpetas. */
+  pickFolder?: typeof pickFolder;
 }
 
 const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 export function buildApp(deps: AppDeps) {
-  const { git, agents, claude, github, usage, usageReportToken, allowedOrigins, logger = true } = deps;
+  const { project, agents, claude, github, usage, usageReportToken, allowedOrigins, logger = true } = deps;
   // removeAdditional: false → campos desconocidos dan 400 en vez de ignorarse en silencio.
   const app = Fastify({ logger, ajv: { customOptions: { removeAdditional: false } } });
 
@@ -56,13 +59,13 @@ export function buildApp(deps: AppDeps) {
     return reply.status(500).send({ error: 'INTERNAL', message: 'Error interno' });
   });
 
-  app.get('/api/health', async () => ({ ok: true, repoRoot: git.repoRoot, worktreesDir: git.worktreesDir }));
-  app.register(worktreeRoutes, { prefix: '/api/worktrees', git, agents });
-  app.register(agentRoutes, { prefix: '/api/agents', git, agents });
-  app.register(eventRoutes, { prefix: '/api/events', agents, usage });
+  app.get('/api/health', async () => ({ ok: true, project: (await project.info())?.path ?? null }));
+  app.register(worktreeRoutes, { prefix: '/api/worktrees', project, agents });
+  app.register(agentRoutes, { prefix: '/api/agents', project, agents });
+  app.register(eventRoutes, { prefix: '/api/events', agents, usage, project });
   app.register(claudeRoutes, { prefix: '/api/claude', claude });
   app.register(githubRoutes, { prefix: '/api/github', github });
-  app.register(projectRoutes, { prefix: '/api/project', git });
+  app.register(projectRoutes, { prefix: '/api/project', project, pick: deps.pickFolder });
   app.register(usageRoutes, { prefix: '/api/usage', usage, reportToken: usageReportToken });
 
   return app;

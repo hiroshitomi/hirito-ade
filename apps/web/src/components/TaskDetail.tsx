@@ -4,7 +4,7 @@ import type { AgentMode, AgentPresetInfo, AgentRunInfo, MergeResult, MergeStrate
 import { api, errorMessage } from '../api/client';
 import { loadPreferredMode, ModeBadge, ModePicker } from './AgentMode';
 import { AgentTerminal } from './AgentTerminal';
-import { CodeState, OverlapWarning } from './CodeState';
+import { CodeState, OverlapWarning, RepoBadge } from './CodeState';
 import { taskTitle } from '../lib/agentState';
 import { Button, ErrorText, Field, fieldClass, inputClass, Modal } from './ui';
 
@@ -71,6 +71,7 @@ export function TaskDetail({ worktree, presets, onClose, onChanged, onMerged, on
         <div className="min-w-0">
           <h1 className="truncate font-semibold first-letter:uppercase">{taskTitle(worktree)}</h1>
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-zinc-500">
+            <RepoBadge repo={worktree.repo} />
             <span className="flex items-center gap-1.5">
               <GitBranch className="size-3.5" />
               {worktree.branch} {worktree.baseBranch ? `← ${worktree.baseBranch}` : ''}

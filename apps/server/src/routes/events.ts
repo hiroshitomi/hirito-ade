@@ -2,11 +2,13 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { AdeEvent } from '@ade/shared';
 import { openSse } from '../lib/sse.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
+import type { ProjectService } from '../services/ProjectService.js';
 import type { UsageService } from '../services/UsageService.js';
 
 export interface EventRoutesDeps {
   agents: AgentProcessManager;
   usage: UsageService;
+  project: ProjectService;
   heartbeatMs?: number;
 }
 
@@ -15,7 +17,7 @@ export interface EventRoutesDeps {
  * estado de los agentes y del uso de la suscripción. Así el tablero reacciona al instante (p.ej. "esperando
  * tu confirmación") sin abrir un stream de salida por agente.
  */
-export const eventRoutes: FastifyPluginAsync<EventRoutesDeps> = async (app, { agents, usage, heartbeatMs = 15000 }) => {
+export const eventRoutes: FastifyPluginAsync<EventRoutesDeps> = async (app, { agents, usage, project, heartbeatMs = 15000 }) => {
   app.get('/', async (req, reply) => {
     const sse = openSse(req, reply, heartbeatMs);
     const send = (e: AdeEvent) => sse.send(e.type, e);
@@ -24,5 +26,6 @@ export const eventRoutes: FastifyPluginAsync<EventRoutesDeps> = async (app, { ag
     send({ type: 'usage', usage: usage.get() });
     sse.onClose(agents.onChange((run) => send({ type: 'agent', run })));
     sse.onClose(usage.onChange((u) => send({ type: 'usage', usage: u })));
+    sse.onClose(project.onChange((p) => send({ type: 'project', project: p })));
   });
 };

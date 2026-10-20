@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, FileDiff, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, FileDiff, FolderGit2, TriangleAlert } from 'lucide-react';
 import type { WorktreeSummary } from '@ade/shared';
 
 /**
@@ -40,6 +40,16 @@ export function CodeState({ wt, className = '' }: { wt: WorktreeSummary; classNa
         </span>
       ) : null}
       <OverlapWarning wt={wt} />
+    </span>
+  );
+}
+
+/** Repo de la tarea (útil en un workspace con front, back, microservicios…). */
+export function RepoBadge({ repo }: { repo: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-indigo-500/10 px-1.5 py-0.5 text-xs font-medium text-indigo-300">
+      <FolderGit2 className="size-3" />
+      {repo}
     </span>
   );
 }

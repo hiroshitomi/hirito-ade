@@ -8,6 +8,8 @@ interface Handlers {
   onWaiting: (run: AgentRunInfo) => void;
   /** Nuevo dato de uso de la suscripción de Claude. */
   onUsage: (usage: ClaudeUsage) => void;
+  /** Se abrió otro proyecto (desde esta pestaña u otra). */
+  onProject: () => void;
 }
 
 /** Escucha GET /api/events: estado de los agentes y uso de la suscripción. */
@@ -19,6 +21,8 @@ export function useAgentEvents(h: Handlers) {
     const previous = new Map<string, AgentActivity | null>();
     let debounce: ReturnType<typeof setTimeout> | undefined;
     const es = new EventSource('/api/events');
+
+    es.addEventListener('project', () => handlers.current.onProject());
 
     es.addEventListener('usage', (e) => {
       const ev = JSON.parse((e as MessageEvent<string>).data) as AdeEvent;

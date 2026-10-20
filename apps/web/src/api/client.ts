@@ -5,10 +5,12 @@ import type {
   ClaudeAuthStatus,
   ClaudeUsage,
   CreateWorktreeInput,
+  FolderListing,
   GitHubAuthStatus,
   MergeResult,
   MergeWorktreeRequest,
   ProjectInfo,
+  ProjectState,
   StartAgentInput,
   WorktreeDiff,
   WorktreeInfo,
@@ -74,7 +76,16 @@ export const api = {
   githubLogin: () => request<AgentRunInfo>('POST', '/api/github/login'),
   githubLogout: () => request<GitHubAuthStatus>('POST', '/api/github/logout'),
 
-  project: () => request<ProjectInfo>('GET', '/api/project'),
+  projectState: () => request<ProjectState>('GET', '/api/project'),
+  openProject: (path: string) => request<ProjectInfo>('POST', '/api/project/open', { path }),
+  browseFolders: (path?: string) =>
+    request<FolderListing>('GET', `/api/project/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  /** Abre el selector de carpetas del sistema en el escritorio; espera a que elijas. */
+  pickFolder: () =>
+    request<{ status: 'picked'; path: string } | { status: 'cancelled' } | { status: 'unsupported' }>(
+      'POST',
+      '/api/project/pick',
+    ),
 };
 
 export function errorMessage(err: unknown): string {

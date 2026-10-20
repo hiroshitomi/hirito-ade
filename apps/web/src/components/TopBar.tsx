@@ -1,22 +1,46 @@
-import { ArrowDown, ArrowUp, Bot, ExternalLink, FolderGit2, GitBranch, Hand, Info } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, Info, Layers, Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { ClaudeAuthStatus, ClaudeUsage, GitHubAuthStatus, ProjectInfo, UsageWindow } from '@ade/shared';
+import type { ClaudeAuthStatus, ClaudeUsage, GitHubAuthStatus, ProjectInfo, RepoInfo, UsageWindow } from '@ade/shared';
 import { claudeSummary } from './ClaudeAccount';
 import { TONE_CLASS, TONE_ICON, type Tone } from './ConnectionDialog';
 import { githubSummary } from './GitHubAccount';
 
 /** Proyecto sobre el que trabajan los agentes: lo primero que hay que ver. */
-export function ProjectSummary({ project }: { project: ProjectInfo | null }) {
+export function ProjectSummary({ project, onSwitch }: { project: ProjectInfo | null; onSwitch: () => void }) {
   if (!project) return <div className="h-9" />;
-  const gh = project.remote?.github;
-  const up = project.upstream;
+  const single = project.kind === 'repo' ? project.repos[0] : undefined;
+  const gh = single?.remote?.github;
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2">
-        <FolderGit2 className="size-4 shrink-0 text-indigo-300" />
-        <h2 className="truncate text-base font-semibold" title={project.path}>
-          {project.name}
-        </h2>
+        <button
+          type="button"
+          onClick={onSwitch}
+          title={`${project.path}\nCambiar de proyecto`}
+          className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-800"
+        >
+          {project.kind === 'workspace' ? (
+            <Layers className="size-4 shrink-0 text-indigo-300" />
+          ) : (
+            <FolderGit2 className="size-4 shrink-0 text-indigo-300" />
+          )}
+          <h2 className="truncate text-base font-semibold">{project.name}</h2>
+          <ChevronDown className="size-3.5 shrink-0 text-zinc-500" />
+        </button>
+        {project.kind === 'workspace' ? (
+          <span className="text-xs text-zinc-500">
+            workspace · {project.repos.length} repo{project.repos.length === 1 ? '' : 's'}
+          </span>
+        ) : null}
+        {project.skillsPath ? (
+          <span
+            className="flex items-center gap-1 rounded bg-violet-500/10 px-1.5 py-0.5 text-xs text-violet-300"
+            title={project.skillsPath}
+          >
+            <Sparkles className="size-3" />
+            skills
+          </span>
+        ) : null}
         {gh ? (
           <a
             href={gh.url}
@@ -30,35 +54,90 @@ export function ProjectSummary({ project }: { project: ProjectInfo | null }) {
           </a>
         ) : null}
       </div>
-      <p className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-zinc-500">
-        <span className="flex items-center gap-1">
-          <GitBranch className="size-3" />
-          {project.branch ?? 'detached'}
-        </span>
-        <span className={project.changes ? 'text-amber-300' : ''}>
-          {project.changes ? `${project.changes} cambio${project.changes === 1 ? '' : 's'} sin commitear` : 'limpio'}
-        </span>
-        {up && (up.ahead || up.behind) ? (
-          <span className="flex items-center gap-1" title={`Respecto a ${up.name} (último fetch)`}>
-            {up.ahead ? (
-              <span className="flex items-center text-sky-300">
-                <ArrowUp className="size-3" />
-                {up.ahead} sin subir
-              </span>
-            ) : null}
-            {up.behind ? (
-              <span className="flex items-center text-amber-300">
-                <ArrowDown className="size-3" />
-                {up.behind} por bajar
-              </span>
-            ) : null}
+      {single ? (
+        <p className="flex flex-wrap items-center gap-x-2 font-mono text-xs text-zinc-500">
+          <RepoState repo={single} />
+          <span className="hidden truncate lg:inline" title={single.path}>
+            {single.path}
           </span>
-        ) : null}
-        <span className="hidden truncate lg:inline" title={project.path}>
-          {project.path}
-        </span>
-      </p>
+        </p>
+      ) : (
+        <div className="mt-0.5 flex flex-wrap gap-1.5">
+          {project.repos.map((r) => (
+            <RepoChip key={r.name} repo={r} />
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Rama, cambios sin commitear y ↑/↓ respecto a origin de un repo. */
+function RepoState({ repo }: { repo: RepoInfo }) {
+  const up = repo.upstream;
+  return (
+    <>
+      <span className="flex items-center gap-1">
+        <GitBranch className="size-3" />
+        {repo.branch ?? 'detached'}
+      </span>
+      <span className={repo.changes ? 'text-amber-300' : ''}>
+        {repo.changes ? `${repo.changes} cambio${repo.changes === 1 ? '' : 's'} sin commitear` : 'limpio'}
+      </span>
+      {up && (up.ahead || up.behind) ? (
+        <span className="flex items-center gap-1" title={`Respecto a ${up.name} (último fetch)`}>
+          {up.ahead ? (
+            <span className="flex items-center text-sky-300">
+              <ArrowUp className="size-3" />
+              {up.ahead} sin subir
+            </span>
+          ) : null}
+          {up.behind ? (
+            <span className="flex items-center text-amber-300">
+              <ArrowDown className="size-3" />
+              {up.behind} por bajar
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** Ficha compacta de un repo dentro de un workspace; el detalle va en el tooltip. */
+function RepoChip({ repo }: { repo: RepoInfo }) {
+  const up = repo.upstream;
+  const detail = [
+    repo.path,
+    `rama ${repo.branch ?? 'detached'}`,
+    repo.changes ? `${repo.changes} cambios sin commitear` : 'sin cambios locales',
+    up?.ahead ? `${up.ahead} commits sin subir a ${up.name}` : null,
+    up?.behind ? `${up.behind} commits por bajar de ${up.name}` : null,
+    repo.remote?.github ? `GitHub: ${repo.remote.github.owner}/${repo.remote.github.repo}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const body = (
+    <>
+      <span className="font-sans font-medium text-zinc-300">{repo.name}</span>
+      <span className="flex items-center gap-0.5">
+        <GitBranch className="size-3" />
+        {repo.branch ?? 'detached'}
+      </span>
+      {repo.changes ? <span className="size-1.5 rounded-full bg-amber-400" /> : null}
+      {up?.ahead ? <span className="text-sky-300">↑{up.ahead}</span> : null}
+      {up?.behind ? <span className="text-amber-300">↓{up.behind}</span> : null}
+    </>
+  );
+  const cls = 'flex items-center gap-1.5 rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-xs text-zinc-500';
+  return repo.remote?.github ? (
+    <a href={repo.remote.github.url} target="_blank" rel="noreferrer" title={detail} className={`${cls} hover:bg-zinc-800`}>
+      {body}
+    </a>
+  ) : (
+    <span title={detail} className={cls}>
+      {body}
+    </span>
   );
 }
 
@@ -85,7 +164,7 @@ export function StatusStrip(props: StatusStripProps) {
 
       {showUsage ? <UsageMeters usage={props.usage} /> : null}
 
-      <Divider />
+      {props.claude && props.github ? <Divider /> : null}
       {props.github ? (
         <Chip tone={githubSummary(props.github).tone} onClick={props.onOpenGitHub} title="Cuenta de GitHub">
           {githubSummary(props.github).label}

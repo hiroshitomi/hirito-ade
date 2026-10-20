@@ -3,10 +3,10 @@ import type { CreateWorktreeInput, MergeWorktreeRequest, WorktreeSummary } from 
 import { computeOverlaps } from '../services/GitWorktreeService.js';
 import { AdeError, WorktreeNotFoundError } from '../lib/errors.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
-import type { GitWorktreeService } from '../services/GitWorktreeService.js';
+import type { ProjectService } from '../services/ProjectService.js';
 
 export interface WorktreeRoutesDeps {
-  git: GitWorktreeService;
+  project: ProjectService;
   agents: AgentProcessManager;
 }
 
@@ -18,7 +18,7 @@ const idParams = {
 
 const branchName = { type: 'string', minLength: 1, maxLength: 200 } as const;
 
-export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app, { git, agents }) => {
+export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app, { project, agents }) => {
   app.post<{ Body: CreateWorktreeInput }>(
     '/create',
     {
@@ -28,6 +28,7 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
           required: ['name'],
           additionalProperties: false,
           properties: {
+            repo: { type: 'string', minLength: 1, maxLength: 200 },
             name: { type: 'string', minLength: 1, maxLength: 200 },
             baseRef: branchName,
             branch: branchName,
@@ -35,27 +36,28 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
         },
       },
     },
-    async (req, reply) => reply.status(201).send(await git.create(req.body)),
+    async (req, reply) => {
+      const { repo, ...input } = req.body;
+      return reply.status(201).send(await project.repo(repo).create(input));
+    },
   );
 
-  app.get<{ Querystring: { all?: boolean } }>(
-    '/',
-    { schema: { querystring: { type: 'object', properties: { all: { type: 'boolean' } } } } },
-    async (req): Promise<WorktreeSummary[]> => {
-      const list = await git.listWithStatus({ managedOnly: !req.query.all });
-      const overlaps = computeOverlaps(list.filter((w) => w.managed));
+  app.get('/', async (): Promise<WorktreeSummary[]> => {
+      // Sin proyecto abierto, lista vacía: el dashboard muestra la pantalla de bienvenida.
+      if (!project.isOpen) return [];
+      const list = await project.listWithStatus();
+      const overlaps = computeOverlaps(list);
       return list.map((w) => ({
         ...w,
         agentRunning: agents.isRunningFor(w.id),
         agent: agents.latestFor(w.id),
         overlaps: overlaps.get(w.id) ?? [],
       }));
-    },
-  );
+  });
 
   app.get<{ Params: { id: string } }>('/:id', { schema: { params: idParams } }, async (req): Promise<WorktreeSummary> => {
     // Los solapes necesitan el estado de todas las tareas: se reutiliza el listado.
-    const list = await git.listWithStatus({ managedOnly: true });
+    const list = await project.listWithStatus();
     const wt = list.find((w) => w.id === req.params.id);
     if (!wt) throw new WorktreeNotFoundError(req.params.id);
     return {
@@ -66,9 +68,10 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
     };
   });
 
-  app.get<{ Params: { id: string } }>('/:id/diff', { schema: { params: idParams } }, async (req) =>
-    git.getDiff(req.params.id),
-  );
+  app.get<{ Params: { id: string } }>('/:id/diff', { schema: { params: idParams } }, async (req) => {
+    const { svc } = await project.find(req.params.id);
+    return svc.getDiff(req.params.id);
+  });
 
   app.delete<{ Params: { id: string }; Querystring: { force?: boolean; keepBranch?: boolean } }>(
     '/:id',
@@ -83,10 +86,10 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
     },
     async (req, reply) => {
       const { id } = req.params;
-      await git.get(id); // 404 antes de matar nada
+      const { svc } = await project.find(id); // 404 antes de matar nada
       // Descartar implica parar al agente: no se puede borrar un directorio en uso.
       await agents.disposeWorktree(id);
-      await git.remove(id, { force: req.query.force, deleteBranch: !req.query.keepBranch });
+      await svc.remove(id, { force: req.query.force, deleteBranch: !req.query.keepBranch });
       return reply.status(204).send();
     },
   );
@@ -116,7 +119,8 @@ export const worktreeRoutes: FastifyPluginAsync<WorktreeRoutesDeps> = async (app
       if (agents.isRunningFor(id)) {
         throw new AdeError('Detén el agente antes de fusionar', 'AGENT_RUNNING', 409);
       }
-      const result = await git.merge(id, input);
+      const { svc } = await project.find(id);
+      const result = await svc.merge(id, input);
       if (result.removed) await agents.disposeWorktree(id);
       return result;
     },

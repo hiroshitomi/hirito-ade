@@ -70,12 +70,20 @@ Seguridad: escucha solo en loopback, exige `Host` local y `Origin` en lista blan
 
 ```bash
 npm install
-ADE_REPO=/ruta/a/tu/repo npm run dev   # server (:4317) + dashboard en http://localhost:5173
+npm run dev        # server (:4317) + dashboard en http://localhost:5173
 npm test
 npm run typecheck
 ```
 
-`ADE_REPO` es el repositorio sobre el que trabajarán los agentes (no este proyecto).
+El proyecto se abre desde la UI: **Examinar…** (selector de carpetas del sistema), el
+navegador de carpetas integrado, pegando la ruta o desde los recientes. ADE recuerda el
+último y lo reabre al arrancar (`~/.ade/projects.json`). `ADE_REPO=/ruta` sigue
+funcionando para abrir uno concreto al arrancar.
+
+- **Repo:** la carpeta es un repositorio git.
+- **Workspace:** la carpeta contiene varios repos (front, back, microservicios…). Al crear
+  una tarea se elige el repo; los solapes se calculan por repo. Si la carpeta tiene
+  `.claude/skills`, se muestra en la cabecera.
 
 ### Windows
 
@@ -87,7 +95,6 @@ binarios precompilados para Windows, así que no hace falta Visual Studio.
 git clone https://github.com/hiroshitomi/hirito-ade.git
 cd hirito-ade
 npm install
-$env:ADE_REPO = "C:\ruta\a\tu\repo"
 npm run dev
 ```
 

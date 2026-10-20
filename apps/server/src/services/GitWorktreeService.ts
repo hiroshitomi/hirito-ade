@@ -10,7 +10,7 @@ import type {
   MergeResult,
   MergeWorktreeInput,
   ChangeStats,
-  ProjectInfo,
+  RepoInfo,
   WorktreeOverlap,
   WorktreeDiff,
   WorktreeInfo,
@@ -31,6 +31,8 @@ import { Mutex } from '../lib/mutex.js';
 export interface GitWorktreeServiceOptions {
   /** Cualquier ruta dentro del repositorio a orquestar. */
   repoPath: string;
+  /** Nombre del repo dentro del proyecto. Por defecto, el de su carpeta. */
+  name?: string;
   /**
    * Dónde se crean los worktrees. Por defecto `~/.ade/worktrees/<repo>-<hash>`:
    * fuera del repo para que watchers, linters o tsc del checkout principal no
@@ -70,6 +72,7 @@ export class GitWorktreeService {
   private readonly lock = new Mutex();
 
   private constructor(
+    readonly name: string,
     readonly repoRoot: string,
     readonly worktreesDir: string,
     private readonly branchPrefix: string,
@@ -95,6 +98,7 @@ export class GitWorktreeService {
     await mkdir(worktreesDir, { recursive: true });
 
     return new GitWorktreeService(
+      opts.name ?? path.basename(repoRoot),
       repoRoot,
       await realpath(worktreesDir), // git reporta rutas reales (p.ej. /private/var en macOS)
       opts.branchPrefix ?? 'ade/',
@@ -117,6 +121,7 @@ export class GitWorktreeService {
       const managed = isInside(this.worktreesDir, r.path);
       return {
         id: managed ? path.basename(r.path) : i === 0 ? 'main' : `external-${i}`,
+        repo: this.name,
         path: r.path,
         branch: r.branch,
         head: r.head,
@@ -184,7 +189,7 @@ export class GitWorktreeService {
   }
 
   /** Resumen del repositorio para la cabecera del dashboard. Solo lectura, sin `git fetch`. */
-  async projectInfo(): Promise<ProjectInfo> {
+  async repoInfo(): Promise<RepoInfo> {
     const cwd = this.repoRoot;
     const [branchRes, status, originRes, upstreamRes] = await Promise.all([
       this.git(['symbolic-ref', '--short', '-q', 'HEAD'], { allowExitCodes: [1] }),
@@ -193,7 +198,7 @@ export class GitWorktreeService {
       this.git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { allowExitCodes: [128] }),
     ]);
 
-    let upstream: ProjectInfo['upstream'] = null;
+    let upstream: RepoInfo['upstream'] = null;
     if (upstreamRes.exitCode === 0 && upstreamRes.stdout) {
       const { stdout } = await this.git(['rev-list', '--left-right', '--count', '@{u}...HEAD']);
       const [behind = 0, ahead = 0] = stdout.split(/\s+/).map(Number);
@@ -202,7 +207,7 @@ export class GitWorktreeService {
 
     const url = originRes.exitCode === 0 ? redactUrl(originRes.stdout) : null;
     return {
-      name: path.basename(cwd),
+      name: this.name,
       path: cwd,
       branch: branchRes.stdout || null,
       // Con -z, un renombrado añade una entrada extra (la ruta original) sin prefijo "XY ".
@@ -598,19 +603,21 @@ export function slugify(name: string): string {
  * mejor saberlo mientras trabajan que en el merge.
  */
 export function computeOverlaps(list: WorktreeWithStatus[]): Map<string, WorktreeOverlap[]> {
+  // La clave incluye el repo: `src/index.ts` del front y del back son ficheros distintos.
+  const key = (wt: WorktreeWithStatus, p: string) => `${wt.repo}\0${p}`;
   const owners = new Map<string, WorktreeWithStatus[]>();
   for (const wt of list) {
     for (const p of wt.status?.changes.paths ?? []) {
-      const arr = owners.get(p);
+      const arr = owners.get(key(wt, p));
       if (arr) arr.push(wt);
-      else owners.set(p, [wt]);
+      else owners.set(key(wt, p), [wt]);
     }
   }
   const result = new Map<string, WorktreeOverlap[]>();
   for (const wt of list) {
     const shared = new Map<string, WorktreeOverlap>();
     for (const p of wt.status?.changes.paths ?? []) {
-      for (const other of owners.get(p) ?? []) {
+      for (const other of owners.get(key(wt, p)) ?? []) {
         if (other.id === wt.id) continue;
         const entry = shared.get(other.id) ?? { worktreeId: other.id, title: other.title, files: [] };
         entry.files.push(p);

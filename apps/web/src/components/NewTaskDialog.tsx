@@ -9,13 +9,16 @@ interface Props {
   presets: AgentPresetInfo[];
   claude: ClaudeAuthStatus | null;
   onConnectClaude: () => void;
-  /** Subtarea: parte de la rama de otra tarea (y se fusionará en ella). */
-  parent?: { branch: string; title: string };
+  /** Repos del proyecto (más de uno = workspace: hay que elegir). */
+  repos: string[];
+  /** Subtarea: parte de la rama de otra tarea (y se fusionará en ella), en su mismo repo. */
+  parent?: { branch: string; title: string; repo: string };
   onClose: () => void;
   onCreated: (wt: WorktreeInfo) => void;
 }
 
-export function NewTaskDialog({ presets, claude, onConnectClaude, parent, onClose, onCreated }: Props) {
+export function NewTaskDialog({ presets, claude, onConnectClaude, repos, parent, onClose, onCreated }: Props) {
+  const [repo, setRepo] = useState(() => parent?.repo ?? loadLastRepo(repos));
   const [name, setName] = useState('');
   const [baseRef, setBaseRef] = useState(parent?.branch ?? '');
   const [preset, setPreset] = useState(presets[0]?.id ?? '');
@@ -31,7 +34,12 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, parent, onClos
     setBusy(true);
     setError(null);
     try {
-      const wt = await api.createWorktree({ name: name.trim(), baseRef: baseRef.trim() || undefined });
+      saveLastRepo(repo);
+      const wt = await api.createWorktree({
+        repo: repos.length > 1 ? repo : undefined,
+        name: name.trim(),
+        baseRef: baseRef.trim() || undefined,
+      });
       if (preset) {
         // Si el agente no arranca, el worktree ya existe: lo abrimos igualmente y se puede relanzar.
         await api
@@ -53,6 +61,17 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, parent, onClos
   return (
     <Modal title={parent ? `Nueva subtarea de «${parent.title}»` : 'Nueva tarea'} onClose={onClose} size="lg">
       <form onSubmit={submit} className="space-y-4">
+        {repos.length > 1 ? (
+          <Field label="Repositorio" hint={parent ? 'Una subtarea trabaja en el mismo repo que su tarea padre.' : undefined}>
+            <select className={inputClass} value={repo} onChange={(e) => setRepo(e.target.value)} disabled={!!parent}>
+              {repos.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
         <Field label="Nombre de la tarea" hint="Se usa para la rama: ade/<nombre>-<sufijo>">
           <input
             autoFocus
@@ -133,4 +152,25 @@ export function NewTaskDialog({ presets, claude, onConnectClaude, parent, onClos
       </form>
     </Modal>
   );
+}
+
+const REPO_KEY = 'ade.lastRepo';
+
+/** Último repo elegido: en un workspace sueles trabajar varias veces seguidas en el mismo. */
+function loadLastRepo(repos: string[]): string {
+  try {
+    const saved = localStorage.getItem(REPO_KEY);
+    if (saved && repos.includes(saved)) return saved;
+  } catch {
+    // Sin almacenamiento: el primero.
+  }
+  return repos[0] ?? '';
+}
+
+function saveLastRepo(repo: string) {
+  try {
+    if (repo) localStorage.setItem(REPO_KEY, repo);
+  } catch {
+    // Ignorado: solo es una preferencia.
+  }
 }

@@ -2,7 +2,7 @@ import { Bot, GitBranch, Hand } from 'lucide-react';
 import type { WorktreeSummary } from '@ade/shared';
 import { agentState, taskTitle } from '../lib/agentState';
 import { ModeBadge } from './AgentMode';
-import { CodeState } from './CodeState';
+import { CodeState, RepoBadge } from './CodeState';
 
 type Column = 'waiting' | 'running' | 'review' | 'idle';
 
@@ -78,6 +78,7 @@ function TaskCard({ wt, onOpen }: { wt: WorktreeSummary; onOpen: () => void }) {
         <span className="truncate">{wt.branch ?? 'detached'}</span>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <RepoBadge repo={wt.repo} />
         {wt.baseBranch ? <Chip title="Rama de la que parte y en la que se fusionará">← {wt.baseBranch}</Chip> : null}
         {wt.agent ? <ModeBadge mode={wt.agent.mode} /> : null}
       </div>

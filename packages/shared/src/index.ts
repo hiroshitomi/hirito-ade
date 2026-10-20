@@ -3,6 +3,8 @@
 export interface WorktreeInfo {
   /** Identificador estable y URL-safe (= nombre de la carpeta del worktree). */
   id: string;
+  /** Repo al que pertenece (nombre de su carpeta); en un workspace hay varios. */
+  repo: string;
   path: string;
   /** Nombre legible con el que se creó la tarea. */
   title: string | null;
@@ -58,6 +60,8 @@ export type WorktreeSummary = WorktreeWithStatus & {
 };
 
 export interface CreateWorktreeInput {
+  /** Repo del proyecto en el que crear la tarea (obligatorio si el proyecto tiene varios). */
+  repo?: string;
   /** Nombre legible de la tarea; se usa para generar id y rama. */
   name: string;
   /** Rama/commit de partida. Por defecto la rama principal detectada. */
@@ -180,7 +184,11 @@ export type AgentStreamEvent =
   | { type: 'exit'; run: AgentRunInfo };
 
 /** Eventos SSE de GET /api/events: cambios de estado de cualquier agente. */
-export type AdeEvent = { type: 'agent'; run: AgentRunInfo } | { type: 'usage'; usage: ClaudeUsage };
+export type AdeEvent =
+  | { type: 'agent'; run: AgentRunInfo }
+  | { type: 'usage'; usage: ClaudeUsage }
+  /** Se abrió otro proyecto: el dashboard debe recargar todo. */
+  | { type: 'project'; project: ProjectInfo | null };
 
 // -----------------------------------------------------------------------------
 // Cuenta de Claude (suscripción)
@@ -207,7 +215,8 @@ export interface ClaudeAuthStatus {
 // Proyecto, GitHub y uso
 // -----------------------------------------------------------------------------
 
-export interface ProjectInfo {
+/** Estado de un repo del proyecto (su checkout principal). */
+export interface RepoInfo {
   name: string;
   path: string;
   /** Rama del checkout principal (null en detached HEAD). */
@@ -218,6 +227,47 @@ export interface ProjectInfo {
   remote: { url: string; github: { owner: string; repo: string; url: string } | null } | null;
   /** Comparación con la rama remota que sigue la actual (sin hacer fetch). */
   upstream: { name: string; ahead: number; behind: number } | null;
+}
+
+/**
+ * Proyecto abierto en ADE:
+ * - 'repo': la carpeta es un repositorio git.
+ * - 'workspace': la carpeta contiene varios repositorios (front, back, microservicios…).
+ */
+export interface ProjectInfo {
+  name: string;
+  path: string;
+  kind: 'repo' | 'workspace';
+  /** `.claude/skills` en la raíz del proyecto, si existe. */
+  skillsPath: string | null;
+  repos: RepoInfo[];
+}
+
+export interface RecentProject {
+  name: string;
+  path: string;
+  kind: 'repo' | 'workspace';
+  openedAt: string;
+}
+
+/** Respuesta de GET /api/project. */
+export interface ProjectState {
+  project: ProjectInfo | null;
+  recent: RecentProject[];
+}
+
+/** Respuesta de GET /api/project/browse: carpetas para el navegador integrado. */
+export interface FolderListing {
+  path: string;
+  /** null en la raíz (o en la lista de unidades en Windows). */
+  parent: string | null;
+  /** La carpeta actual es un repo git. */
+  isRepo: boolean;
+  /** Cuántas subcarpetas son repos git (si > 0, es un workspace válido). */
+  repoCount: number;
+  entries: { name: string; path: string; isRepo: boolean }[];
+  /** Accesos rápidos: carpeta personal y, en Windows, las unidades (C:\, D:\…). */
+  roots: { name: string; path: string }[];
 }
 
 export interface GitHubAuthStatus {

@@ -1,11 +1,20 @@
 import { Bell, BellOff, CheckCircle2, Grid2x2, KanbanSquare, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { AgentPresetInfo, AgentRunInfo, ClaudeAuthStatus, ClaudeUsage, GitHubAuthStatus, MergeResult } from '@ade/shared';
+import type {
+  AgentPresetInfo,
+  AgentRunInfo,
+  ClaudeAuthStatus,
+  ClaudeUsage,
+  GitHubAuthStatus,
+  MergeResult,
+  ProjectInfo,
+} from '@ade/shared';
 import { api, errorMessage } from './api/client';
 import { Board } from './components/Board';
 import { ClaudeAccountDialog } from './components/ClaudeAccount';
 import { GitHubAccountDialog } from './components/GitHubAccount';
 import { NewTaskDialog } from './components/NewTaskDialog';
+import { OpenProjectDialog, WelcomeScreen } from './components/OpenProject';
 import { TaskDetail } from './components/TaskDetail';
 import { TerminalGrid } from './components/TerminalGrid';
 import { ProjectSummary, StatusStrip } from './components/TopBar';
@@ -21,10 +30,12 @@ const VIEW_KEY = 'ade.view';
 export function App() {
   // El polling cubre cambios de git (ficheros editados); los de agentes llegan al instante por /api/events.
   const { data: worktrees, error, loading, refresh } = usePolling(api.listWorktrees, 3000);
-  const { data: project, refresh: refreshProject } = usePolling(api.project, 10000);
+  const { data: projectState, refresh: refreshProject } = usePolling(api.projectState, 10000);
+  const project = projectState?.project ?? null;
+  const [switching, setSwitching] = useState(false);
   const [presets, setPresets] = useState<AgentPresetInfo[]>([]);
   // null = cerrado; { parent } = subtarea que parte de la rama de otra tarea.
-  const [creating, setCreating] = useState<{ parent?: { branch: string; title: string } } | null>(null);
+  const [creating, setCreating] = useState<{ parent?: { branch: string; title: string; repo: string } } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [view, setView] = useState<View>(loadView);
@@ -66,7 +77,23 @@ export function App() {
     },
     [worktrees, notifications],
   );
-  useAgentEvents({ onAnyChange: refreshNow, onWaiting: handleWaiting, onUsage: setUsage });
+  useAgentEvents({
+    onAnyChange: refreshNow,
+    onWaiting: handleWaiting,
+    onUsage: setUsage,
+    onProject: () => {
+      void refreshProject();
+      void refresh();
+    },
+  });
+
+  function handleProjectOpened(opened: ProjectInfo) {
+    setSwitching(false);
+    setOpenId(null);
+    setToast(`Proyecto abierto: ${opened.name}`);
+    void refreshProject();
+    void refresh();
+  }
 
   // "(2) ADE" en la pestaña: visible aunque estés en otra ventana.
   const waitingCount = worktrees?.filter(needsAttention).length ?? 0;
@@ -98,7 +125,7 @@ export function App() {
       <header className="sticky top-0 z-20 bg-zinc-950/95 backdrop-blur">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-zinc-800 px-4 py-2.5">
           <span className="rounded-md bg-indigo-600 px-2 py-1 text-sm font-bold tracking-tight">ADE</span>
-          <ProjectSummary project={project} />
+          <ProjectSummary project={project} onSwitch={() => setSwitching(true)} />
 
           <div className="ml-auto flex items-center gap-2">
             <div className="flex rounded-md border border-zinc-800 p-0.5" role="tablist" aria-label="Vista">
@@ -121,7 +148,7 @@ export function App() {
                 <BellOff className="size-4" />
               </span>
             ) : null}
-            <Button variant="primary" onClick={() => setCreating({})} disabled={!!error && !worktrees}>
+            <Button variant="primary" onClick={() => setCreating({})} disabled={!project}>
               <Plus className="size-4" />
               Nueva tarea
             </Button>
@@ -145,9 +172,12 @@ export function App() {
           </p>
         ) : null}
 
-        {worktrees && view === 'board' ? <Board worktrees={worktrees} onOpen={setOpenId} /> : null}
+        {projectState && !project ? (
+          <WelcomeScreen recent={projectState.recent} onOpened={handleProjectOpened} />
+        ) : null}
+        {project && worktrees && view === 'board' ? <Board worktrees={worktrees} onOpen={setOpenId} /> : null}
         {/* Se desmonta con el detalle abierto: sus terminales liberan conexiones SSE (máx. 6 por host). */}
-        {worktrees && view === 'terminals' && !open ? (
+        {project && worktrees && view === 'terminals' && !open ? (
           <TerminalGrid
             worktrees={worktrees}
             onOpen={setOpenId}
@@ -163,6 +193,7 @@ export function App() {
           presets={presets}
           claude={claude}
           onConnectClaude={() => setAccountOpen('claude')}
+          repos={project?.repos.map((r) => r.name) ?? []}
           parent={creating.parent}
           onClose={() => setCreating(null)}
           onCreated={async (wt) => {
@@ -182,12 +213,23 @@ export function App() {
           onClose={closeDetail}
           onChanged={refreshNow}
           onMerged={handleMerged}
-          onNewSubtask={() => setCreating({ parent: { branch: open.branch ?? open.id, title: taskTitle(open) } })}
+          onNewSubtask={() =>
+            setCreating({ parent: { branch: open.branch ?? open.id, title: taskTitle(open), repo: open.repo } })
+          }
           onDiscarded={() => {
             setOpenId(null);
             setToast('Tarea descartada');
             void refresh();
           }}
+        />
+      ) : null}
+
+      {switching && projectState ? (
+        <OpenProjectDialog
+          recent={projectState.recent.filter((r) => r.path !== project?.path)}
+          startPath={project ? project.path.replace(/[\\/][^\\/]+$/, '') : undefined}
+          onOpened={handleProjectOpened}
+          onClose={() => setSwitching(false)}
         />
       ) : null}
 

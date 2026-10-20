@@ -100,8 +100,10 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
 };
 
 export const config = {
-  /** Obligatorio: el repositorio sobre el que trabajan los agentes. */
+  /** Opcional: proyecto a abrir al arrancar (si no, el último usado; se cambia desde la UI). */
   repoPath: process.env.ADE_REPO,
+  /** Último proyecto abierto y lista de recientes. */
+  projectsFile: process.env.ADE_PROJECTS_FILE ?? path.join(os.homedir(), '.ade', 'projects.json'),
   worktreesDir: process.env.ADE_WORKTREES_DIR,
   port: Number(process.env.PORT ?? 4317),
   /** Donde se guarda el último uso conocido de la suscripción. */

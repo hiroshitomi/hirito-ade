@@ -330,6 +330,11 @@ export class AgentProcessManager {
     for (const r of runs) this.runs.delete(r.info.id);
   }
 
+  /** Olvida las ejecuciones terminadas (p.ej. al cambiar de proyecto). */
+  forgetFinished(): void {
+    for (const [id, run] of this.runs) if (!run.running) this.runs.delete(id);
+  }
+
   async stopAll(): Promise<void> {
     await Promise.all([...this.runs.values()].map((r) => r.stop(this.killTimeoutMs)));
   }

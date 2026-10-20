@@ -3,10 +3,10 @@ import type { AgentStreamEvent, StartAgentInput } from '@ade/shared';
 import { InvalidInputError } from '../lib/errors.js';
 import { openSse } from '../lib/sse.js';
 import type { AgentProcessManager } from '../services/AgentProcessManager.js';
-import type { GitWorktreeService } from '../services/GitWorktreeService.js';
+import type { ProjectService } from '../services/ProjectService.js';
 
 export interface AgentRoutesDeps {
-  git: GitWorktreeService;
+  project: ProjectService;
   agents: AgentProcessManager;
   /** Intervalo de comentarios keep-alive en SSE (proxies cierran conexiones inactivas). */
   heartbeatMs?: number;
@@ -20,7 +20,7 @@ const idParams = {
 
 const dimension = { type: 'integer', minimum: 2, maximum: 1000 } as const;
 
-export const agentRoutes: FastifyPluginAsync<AgentRoutesDeps> = async (app, { git, agents, heartbeatMs = 15000 }) => {
+export const agentRoutes: FastifyPluginAsync<AgentRoutesDeps> = async (app, { project, agents, heartbeatMs = 15000 }) => {
   app.get('/presets', async () => agents.listPresets());
 
   app.get<{ Querystring: { worktreeId?: string } }>(
@@ -52,8 +52,8 @@ export const agentRoutes: FastifyPluginAsync<AgentRoutesDeps> = async (app, { gi
       if (!agents.isPublicPreset(req.body.preset)) {
         throw new InvalidInputError(`Preset desconocido: '${req.body.preset}'`);
       }
-      // El cwd sale siempre del servicio git, nunca del cliente.
-      const wt = await git.get(req.body.worktreeId);
+      // El cwd sale siempre del worktree registrado en git, nunca del cliente.
+      const { wt } = await project.find(req.body.worktreeId);
       const run = agents.start({ ...req.body, worktreeId: wt.id, cwd: wt.path });
       return reply.status(201).send(run);
     },

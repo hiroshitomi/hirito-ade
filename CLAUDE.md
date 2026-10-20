@@ -23,6 +23,14 @@ Detalle técnico y API en `README.md`.
 
 ## Estado actual (hecho)
 
+**Proyecto desde la UI** (sin `ADE_REPO` obligatorio): bienvenida con "Examinar…" (diálogo
+nativo: PowerShell FolderBrowserDialog en Windows, osascript en macOS, zenity/kdialog en
+Linux), navegador de carpetas integrado, ruta pegada y recientes (`~/.ade/projects.json`,
+se reabre el último). **Workspace**: carpeta con varios repos → un GitWorktreeService por
+repo dentro de `ProjectService`; las tareas llevan `repo`, se crean eligiendo repo y los
+solapes son por repo; detecta `.claude/skills` en la raíz. No se cambia de proyecto con
+agentes en marcha.
+
 Worktrees y fusión (merge/squash, por checkout o por ref, conflictos sin dejar nada a
 medias) · agentes en PTY con SSE reanudable · tablero Kanban (Te necesita / En curso /
 Para revisar / Sin cambios) · vista Terminales (hasta 4) · detección "esperando input"
@@ -42,8 +50,8 @@ entre tareas · subtareas (parten de la rama de otra y se fusionan en ella).
   - 4 principales: **front**, **back** y **2 microservicios**.
   - **testing**.
   - **documentation**: todos los docs, separados por **features**, **bugs** y **reglas de negocio**.
-- Las **skills** están en la carpeta `.claude/skills` (pendiente de confirmar: ¿de qué repo
-  o carpeta padre?).
+- Los 6 repos están bajo **una misma carpeta padre**, y `.claude/skills` está **en esa
+  carpeta padre** (a la altura de los repos) → se abre en ADE como workspace.
 - Suscripción de Claude (Max). Nada de API keys de Claude, Gemini ni GPT.
 
 ## Flujo de trabajo que ADE debe soportar (próximo gran bloque: "casos")
@@ -84,14 +92,21 @@ entre tareas · subtareas (parten de la rama de otra y se fusionan en ella).
 - Las skills de `.claude/skills` se cargan solas si la sesión de análisis se lanza en la
   carpeta que las contiene (o se añade con `--add-dir`).
 
-## Preguntas abiertas para el usuario
+## Respuestas del usuario (cerradas)
 
-1. ¿`.claude/skills` está en una carpeta padre que contiene los 6 repos, o dentro de uno
-   (p.ej. documentation)? ¿Cuál es la ruta?
-2. ¿Los 6 repos están bajo una misma carpeta padre (p.ej. `~/Escritorio/sys-cloud/`)?
-3. ¿De dónde llegan los bugs/mejoras (Jira, GitHub Issues, mensajes)?
-4. ¿Las preguntas y respuestas las contesta solo el usuario o también otras personas?
-5. Formato exacto del documento que genera la skill (para que ADE lea las secciones por repo).
+1. `.claude/skills` está en la carpeta padre, a la altura de los repos.
+2. Los 6 repos están bajo una misma carpeta padre.
+3. Los bugs/mejoras llegan por ahora a mano, escritos como prompt (sin Jira/Issues).
+4. Las preguntas y respuestas las contesta solo el usuario.
+5. El documento de la skill es Markdown (`.md`).
+
+## Siguiente paso previsto
+
+Implementar los **casos** sobre el workspace: la sesión de análisis con Opus debe lanzarse
+en la carpeta del workspace (donde están `.claude/skills`), con acceso a los repos
+(`--add-dir`), y guardar el `.md` en el repo documentation. Ojo: hoy los worktrees viven en
+`~/.ade/worktrees`, fuera del workspace, así que un agente lanzado en un worktree no ve las
+skills de la carpeta padre; para la ejecución habrá que pasarle `--add-dir` o el contexto.
 
 ## Pendientes menores
 
