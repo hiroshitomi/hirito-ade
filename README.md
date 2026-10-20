@@ -76,6 +76,25 @@ npm run typecheck
 ```
 
 `ADE_REPO` es el repositorio sobre el que trabajarán los agentes (no este proyecto).
+
+### Windows
+
+Requisitos: Node.js 22 LTS, Git for Windows ≥ 2.38, Claude Code con el **instalador nativo**
+(`claude.exe`) y, opcionalmente, GitHub CLI (`winget install --id GitHub.cli`). node-pty trae
+binarios precompilados para Windows, así que no hace falta Visual Studio.
+
+```powershell
+git clone https://github.com/hiroshitomi/hirito-ade.git
+cd hirito-ade
+npm install
+$env:ADE_REPO = "C:\ruta\a\tu\repo"
+npm run dev
+```
+
+Diferencias en Windows: los agentes deben ser ejecutables `.exe` (un `claude.cmd` instalado
+con npm no se puede lanzar en una terminal ConPTY; ADE lo indica con un mensaje), el preset
+*Shell* abre PowerShell, y *Detener agente* cierra el proceso directamente (Windows no tiene
+señales). Los tests del servidor usan scripts bash: ejecútalos desde Git Bash o WSL.
 Las columnas del tablero se derivan del estado real: agente esperando input → *Te necesita*;
 agente trabajando → *En curso*; commits o cambios sin fusionar → *Para revisar*; nada → *Sin cambios*.
 

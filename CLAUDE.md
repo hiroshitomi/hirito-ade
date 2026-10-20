@@ -33,7 +33,11 @@ entre tareas · subtareas (parten de la rama de otra y se fusionan en ella).
 
 ## Contexto de trabajo del usuario
 
-- Ubuntu en el trabajo, shell fish. Quiere probar ADE en local.
+- Ubuntu en el trabajo (shell fish), pero **las pruebas de ADE las hace en su PC con Windows**.
+- Soporte Windows añadido sin probar en Windows real: node-pty 1.1.0 (binarios precompilados),
+  parada sin señales, resolución de `.exe` por PATH/PATHEXT (`lib/command.ts`; un `.cmd` de npm
+  da error claro), rutas de la status line con `/`, PowerShell como shell. Pendiente: feedback
+  de la primera prueba en Windows.
 - **6 repos** en total:
   - 4 principales: **front**, **back** y **2 microservicios**.
   - **testing**.

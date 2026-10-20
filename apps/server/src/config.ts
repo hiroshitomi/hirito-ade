@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentMode } from '@ade/shared';
+import { shellPath } from './lib/command.js';
 
 export interface AgentPreset {
   label: string;
@@ -32,14 +33,18 @@ export const STATUSLINE_SCRIPT = fileURLToPath(new URL('../bin/ade-statusline.mj
  * line sustituye a la tuya si tienes una.
  */
 const ADE_CLAUDE_SETTINGS = JSON.stringify({
-  statusLine: { type: 'command', command: `"${process.execPath}" "${STATUSLINE_SCRIPT}"` },
+  // Barras normales también en Windows: el comando lo ejecuta una shell (bash o cmd) y ambas las aceptan.
+  statusLine: { type: 'command', command: `"${shellPath(process.execPath)}" "${shellPath(STATUSLINE_SCRIPT)}"` },
 });
 
 /** Entorno para un proceso hijo: el del servidor menos `unset`, más `extra`. */
 export function childEnv(unset: readonly string[] = [], extra: Record<string, string> = {}): Record<string, string> {
+  // En Windows los nombres de variables no distinguen mayúsculas (Anthropic_Api_Key = ANTHROPIC_API_KEY).
+  const norm = (k: string) => (process.platform === 'win32' ? k.toUpperCase() : k);
+  const drop = new Set(unset.map(norm));
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && !unset.includes(k)) env[k] = v;
+    if (v !== undefined && !drop.has(norm(k))) env[k] = v;
   }
   return { ...env, ...extra };
 }
@@ -70,7 +75,8 @@ export const defaultAgentPresets: Record<string, AgentPreset> = {
   },
   shell: {
     label: 'Shell',
-    command: process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : 'bash'),
+    // En Windows se ignora SHELL: desde Git Bash vale "/usr/bin/bash", una ruta que ConPTY no entiende.
+    command: os.platform() === 'win32' ? 'powershell.exe' : process.env.SHELL || 'bash',
     args: () => [],
     acceptsPrompt: false,
   },

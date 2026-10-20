@@ -13,7 +13,7 @@
     "@ade/shared": "*",
     "execa": "^9.5.2",
     "fastify": "^5.2.1",
-    "node-pty": "^1.0.0"
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

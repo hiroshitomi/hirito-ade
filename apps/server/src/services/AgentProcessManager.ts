@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import * as pty from 'node-pty';
 import type { AgentActivity, AgentMode, AgentPresetInfo, AgentRunInfo, AgentStreamEvent } from '@ade/shared';
 import { childEnv, type AgentPreset } from '../config.js';
+import { resolveCommand } from '../lib/command.js';
 import { AdeError, InvalidInputError } from '../lib/errors.js';
 
 export interface AgentProcessManagerOptions {
@@ -158,8 +159,14 @@ class AgentRun extends EventEmitter<{ event: [AgentStreamEvent]; change: [AgentR
   stop(killTimeoutMs: number): Promise<void> {
     if (this.running && !this.stopRequested) {
       this.stopRequested = true;
-      this.proc.kill('SIGTERM');
-      this.killTimer = setTimeout(() => this.proc.kill('SIGKILL'), killTimeoutMs);
+      if (process.platform === 'win32') {
+        // node-pty en Windows no admite señales (lanza un error si se pasa una):
+        // kill() cierra la pseudo-consola y termina el proceso directamente.
+        this.proc.kill();
+      } else {
+        this.proc.kill('SIGTERM');
+        this.killTimer = setTimeout(() => this.proc.kill('SIGKILL'), killTimeoutMs);
+      }
     }
     return this.exited;
   }
@@ -239,21 +246,24 @@ export class AgentProcessManager {
 
     const id = randomUUID();
     const args = preset.args(opts.prompt, mode ?? undefined);
+    const env = childEnv(preset.unsetEnv, {
+      ...this.baseEnv,
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      ADE_WORKTREE_ID: opts.worktreeId,
+      ADE_AGENT_ID: id,
+      ...opts.env,
+    });
+    // En Windows, ruta completa al .exe (o un error claro si solo hay un .cmd).
+    const command = resolveCommand(preset.command, env);
     let proc: pty.IPty;
     try {
-      proc = pty.spawn(preset.command, args, {
+      proc = pty.spawn(command, args, {
         name: 'xterm-256color',
         cwd: opts.cwd,
         cols: opts.cols ?? 120,
         rows: opts.rows ?? 32,
-        env: childEnv(preset.unsetEnv, {
-          ...this.baseEnv,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-          ADE_WORKTREE_ID: opts.worktreeId,
-          ADE_AGENT_ID: id,
-          ...opts.env,
-        }),
+        env,
       });
     } catch (err) {
       throw new AdeError(`No se pudo lanzar '${preset.command}': ${(err as Error).message}`, 'AGENT_SPAWN_FAILED', 500);
